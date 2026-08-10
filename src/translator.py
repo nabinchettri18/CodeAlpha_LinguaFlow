@@ -8,7 +8,7 @@ class TranslationError(Exception):
 
 class Translator:
     """
-    Local LibreTranslate client.
+    LibreTranslate REST API client.
 
     LibreTranslate runs locally and exposes
     a REST API on localhost.
@@ -27,7 +27,7 @@ class Translator:
         target_language,
     ):
         """
-        Translate text using local LibreTranslate.
+        Translate text using LibreTranslate.
         """
 
         if not text or not text.strip():
@@ -78,7 +78,7 @@ class Translator:
                     "an empty response."
                 )
 
-            return translated_text
+            return translated_text.strip()
 
         except requests.RequestException as exc:
             raise TranslationError(
