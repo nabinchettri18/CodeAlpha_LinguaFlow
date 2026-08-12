@@ -7,7 +7,6 @@ import time
 import requests
 
 import streamlit as st
-import streamlit.components.v1 as components
 
 from src.translator import Translator, TranslationError
 from src.languages import LANGUAGES
@@ -1372,7 +1371,7 @@ st.html(
     """
 )
 
-components.html(
+st.html(
     """
     <style>
         * {
@@ -1739,7 +1738,7 @@ if st.session_state.translated_text:
             ensure_ascii=False,
         )
 
-        components.html(
+        st.html(
             f"""
             <style>
 
@@ -1853,7 +1852,7 @@ if st.session_state.translated_text:
             target_code_for_speech,
         )
 
-        components.html(
+        st.html(
             f"""
             <style>
                 * {{ box-sizing: border-box; }}
@@ -2059,7 +2058,7 @@ if st.session_state.translated_text:
             ensure_ascii=False,
         )
 
-        components.html(
+        st.html(
             f"""
             <style>
 
@@ -2447,7 +2446,7 @@ if st.session_state.history_open:
                     ensure_ascii=False,
                 )
 
-                components.html(
+                st.html(
                     f"""
                     <button
                         id="historyCopy{index}"
@@ -2527,7 +2526,7 @@ if st.session_state.history_open:
                     item["target_code"] or "en"
                 )
 
-                components.html(
+                st.html(
                     f"""
                     <button
                         id="historyListen{index}"
