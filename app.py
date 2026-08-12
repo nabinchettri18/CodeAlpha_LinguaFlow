@@ -1533,9 +1533,7 @@ st.html(
             };
         }
     </script>
-    """,
-    height=72,
-    scrolling=False,
+    """
 )
 
 
@@ -1831,9 +1829,7 @@ if st.session_state.translated_text:
                 }};
 
             </script>
-            """,
-            height=48,
-            scrolling=False,
+            """
         )
 
 
@@ -2017,9 +2013,7 @@ if st.session_state.translated_text:
                     window.speechSynthesis.getVoices();
                 }};
             </script>
-            """,
-            height=48,
-            scrolling=False,
+            """
         )
 
 
@@ -2140,9 +2134,7 @@ if st.session_state.translated_text:
                 }};
 
             </script>
-            """,
-            height=48,
-            scrolling=False,
+            """
         )
 
 
@@ -2505,9 +2497,7 @@ if st.session_state.history_open:
                     }};
 
                     </script>
-                    """,
-                    height=48,
-                    scrolling=False,
+                    """
                 )
 
 
@@ -2603,10 +2593,13 @@ if st.session_state.history_open:
                             window.speechSynthesis.speak(utterance);
                         }};
                     </script>
-                    """,
-                    height=48,
-                    scrolling=False,
+                    """
                 )
+
+
+            # ------------------------------------------------
+            # FAVORITE
+            # ------------------------------------------------
 
 
             # ------------------------------------------------
