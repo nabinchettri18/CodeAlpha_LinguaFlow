@@ -28,13 +28,13 @@ try:
         )
     else:
         GEMINI_USE_LOCAL_SERVER = (
-            os.getenv("GEMINI_USE_LOCAL_SERVER", "true").lower() == "true"
+            os.getenv("GEMINI_USE_LOCAL_SERVER", "false").lower() == "true"
         )
 except Exception:
     GEMINI_USE_LOCAL_SERVER = (
-        os.getenv("GEMINI_USE_LOCAL_SERVER", "true").lower() == "true"
+        os.getenv("GEMINI_USE_LOCAL_SERVER", "false").lower() == "true"
     )
-     
+
 
 # ============================================================
 # GEMINI SERVICE

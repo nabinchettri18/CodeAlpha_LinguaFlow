@@ -26,7 +26,7 @@ def _get_config(name, default=""):
 GEMINI_USE_LOCAL_SERVER = (
     _get_config(
         "GEMINI_USE_LOCAL_SERVER",
-        "true",
+        "false",
     ).strip().lower()
     == "true"
 )
