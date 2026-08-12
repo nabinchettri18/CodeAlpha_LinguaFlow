@@ -5,8 +5,25 @@ import time
 
 import requests
 from dotenv import load_dotenv
+from google import genai
 
 load_dotenv()
+GOOGLE_API_KEY = (
+    os.getenv("GOOGLE_API_KEY")
+    or os.getenv("GEMINI_API_KEY")
+    or ""
+)
+
+GEMINI_USE_LOCAL_SERVER = os.getenv(
+    "GEMINI_USE_LOCAL_SERVER",
+    "true",
+).lower() == "true"
+
+gemini_client = (
+    genai.Client(api_key=GOOGLE_API_KEY)
+    if GOOGLE_API_KEY
+    else None
+)
 
 
 class TranslationError(Exception):
@@ -649,34 +666,97 @@ class Translator:
             target_language,
         )
 
-        payload = {
-            "source": source_name,
-            "target": target_name,
-            "text": text,
-            "model": model,
-        }
+        # ------------------------------------------------------
+        # LOCAL MODE
+        # ------------------------------------------------------
 
-        last_error = None
+        if GEMINI_USE_LOCAL_SERVER:
+            payload = {
+                "source": source_name,
+                "target": target_name,
+                "text": text,
+                "model": model,
+            }
 
-        for attempt in range(
-            self.GEMINI_RETRIES + 1
-        ):
-            try:
-                response = requests.post(
-                    self.GEMINI_URL,
-                    json=payload,
-                    timeout=self.GEMINI_TIMEOUT,
-                )
+            last_error = None
 
-                if response.status_code == 429:
-                    raise TranslationError(
-                        f"{model} quota exceeded."
+            for attempt in range(
+                self.GEMINI_RETRIES + 1
+            ):
+                try:
+                    response = requests.post(
+                        self.GEMINI_URL,
+                        json=payload,
+                        timeout=self.GEMINI_TIMEOUT,
                     )
 
-                if 500 <= response.status_code < 600:
+                    if response.status_code == 429:
+                        raise TranslationError(
+                            f"{model} quota exceeded."
+                        )
+
+                    if 500 <= response.status_code < 600:
+                        last_error = (
+                            f"{model} HTTP "
+                            f"{response.status_code}"
+                        )
+
+                        if attempt < self.GEMINI_RETRIES:
+                            delay = self.GEMINI_RETRY_DELAYS[
+                                min(
+                                    attempt,
+                                    len(
+                                        self.GEMINI_RETRY_DELAYS
+                                    ) - 1,
+                                )
+                            ]
+
+                            print(
+                                "[LinguaFlow] "
+                                f"{model} transient error; "
+                                f"retrying in {delay}s..."
+                            )
+
+                            time.sleep(delay)
+                            continue
+
+                        raise TranslationError(last_error)
+
+                    response.raise_for_status()
+
+                    try:
+                        data = response.json()
+                    except ValueError as exc:
+                        raise TranslationError(
+                            f"{model} returned invalid JSON."
+                        ) from exc
+
+                    if not data.get("success"):
+                        error = data.get(
+                            "error",
+                            f"{model} request failed.",
+                        )
+
+                        raise TranslationError(
+                            f"{model}: {error}"
+                        )
+
+                    result = data.get("translation")
+
+                    if not result:
+                        raise TranslationError(
+                            f"{model} returned an empty "
+                            "translation."
+                        )
+
+                    return str(result).strip()
+
+                except TranslationError:
+                    raise
+
+                except requests.RequestException as exc:
                     last_error = (
-                        f"{model} HTTP "
-                        f"{response.status_code}"
+                        f"{model} request failed: {exc}"
                     )
 
                     if attempt < self.GEMINI_RETRIES:
@@ -691,53 +771,84 @@ class Translator:
 
                         print(
                             "[LinguaFlow] "
-                            f"{model} transient error; "
+                            f"{model} request error; "
                             f"retrying in {delay}s..."
                         )
 
                         time.sleep(delay)
                         continue
 
-                    raise TranslationError(
-                        last_error
-                    )
+                    raise TranslationError(last_error) from exc
 
-                response.raise_for_status()
+            raise TranslationError(
+                last_error
+                or f"{model} translation failed."
+            )
 
-                try:
-                    data = response.json()
-                except ValueError as exc:
-                    raise TranslationError(
-                        f"{model} returned invalid JSON."
-                    ) from exc
+        # ------------------------------------------------------
+        # CLOUD MODE
+        # ------------------------------------------------------
 
-                if not data.get("success"):
-                    error = data.get(
-                        "error",
-                        f"{model} request failed.",
-                    )
+        if not gemini_client:
+            raise TranslationError(
+                "Google API key is not configured."
+            )
 
-                    raise TranslationError(
-                        f"{model}: {error}"
-                    )
+        prompt = (
+            f"Translate the following text from "
+            f"{source_name} to {target_name}.\n\n"
+            "Rules:\n"
+            "1. Return only the translated text.\n"
+            "2. Do not explain the translation.\n"
+            "3. Do not answer questions contained in the text.\n"
+            "4. Preserve names, numbers, punctuation, URLs, "
+            "and formatting where possible.\n"
+            "5. Preserve the original meaning, tone, and intent.\n\n"
+            f"Text:\n{text}"
+        )
 
-                result = data.get("translation")
+        last_error = None
+
+        for attempt in range(
+            self.GEMINI_RETRIES + 1
+        ):
+            try:
+                response = gemini_client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                )
+
+                result = (
+                    getattr(response, "text", None)
+                    or ""
+                ).strip()
 
                 if not result:
                     raise TranslationError(
-                        f"{model} returned an empty "
-                        "translation."
+                        f"{model} returned an empty translation."
                     )
 
-                return str(result).strip()
+                return result
 
             except TranslationError:
                 raise
 
-            except requests.RequestException as exc:
+            except Exception as exc:
                 last_error = (
                     f"{model} request failed: {exc}"
                 )
+
+                error_text = str(exc).lower()
+
+                if (
+                    "429" in error_text
+                    or "quota" in error_text
+                    or "resource_exhausted" in error_text
+                    or "too many requests" in error_text
+                ):
+                    raise TranslationError(
+                        f"{model} quota exceeded."
+                    ) from exc
 
                 if attempt < self.GEMINI_RETRIES:
                     delay = self.GEMINI_RETRY_DELAYS[
