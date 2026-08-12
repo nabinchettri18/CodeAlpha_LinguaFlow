@@ -32,7 +32,7 @@ try:
         )
 except Exception:
     GEMINI_USE_LOCAL_SERVER = (
-        os.getenv("GEMINI_USE_LOCAL_SERVER", "false").lower() == "true"
+            os.getenv("GEMINI_USE_LOCAL_SERVER", "false").lower() == "true"
     )
 
 
