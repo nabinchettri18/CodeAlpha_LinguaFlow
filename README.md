@@ -1,536 +1,407 @@
 # 🌐 LinguaFlow
 
-## Language Translation Tool
+**AI-Powered Multilingual Translation Platform**
 
-LinguaFlow is a user-friendly language translation web application developed using Python and Streamlit.
-
-The application allows users to enter text, automatically detect the source language, select a target language, and translate the text using a locally hosted LibreTranslate REST API.
-
-LinguaFlow also provides useful productivity and accessibility features such as translation history, copy-to-clipboard, text-to-speech, clear controls, input validation, and language-detection safeguards.
+LinguaFlow is a resilient multilingual translation platform built around an intelligent provider-fallback architecture. It combines **SQLite caching** with multiple AI translation providers so temporary provider failures do not immediately result in a failed translation request.
 
 ---
 
-## 📌 Project Information
+## ✨ Overview
 
-| Field | Details |
+LinguaFlow uses a hierarchical translation pipeline:
+
+```text
+                    LINGUAFLOW
+                        │
+                        ▼
+                  SQLite Cache
+                   │         │
+                  HIT       MISS
+                   │         │
+                   ▼         ▼
+                Result   Gemini 2.5 Flash
+                              │
+                         failure / quota
+                              ▼
+                       Gemini Flash-Lite
+                              │
+                         failure / quota
+                              ▼
+                    NVIDIA Nemotron 3 Ultra
+                              │
+                           failure
+                              ▼
+                    TranslationError
+```
+
+The cache is checked first. On a cache miss, LinguaFlow attempts the AI providers in order. If a provider fails or becomes unavailable, the system automatically moves to the next provider.
+
+---
+
+# 🚀 Key Features
+
+- 🌍 Multilingual AI translation
+- ⚡ SQLite translation caching
+- 🤖 Gemini 2.5 Flash primary provider
+- 🔄 Gemini Flash-Lite secondary fallback
+- 🛡️ NVIDIA Nemotron 3 Ultra final fallback
+- 🔍 Automatic language detection
+- ✅ Translation output validation
+- 🧩 Streamlit user interface
+- 🔐 Environment-based API configuration
+- 🧪 Independent provider testing
+- ♻️ Graceful provider failure handling
+
+---
+
+# 🧰 Tech Stack
+
+| Layer | Technology |
 |---|---|
-| Project Name | LinguaFlow |
-| Project Type | Language Translation Tool |
-| Internship | CodeAlpha Internship |
-| Task | Task 1 — Language Translation Tool |
 | Frontend | Streamlit |
 | Backend | Python |
-| Translation Service | LibreTranslate REST API |
-| Language Detection | LangDetect + custom heuristics |
-| Repository | CodeAlpha_LinguaFlow |
+| AI service layer | Node.js |
+| Primary model | Gemini 2.5 Flash |
+| Secondary model | Gemini Flash-Lite |
+| Final fallback | NVIDIA Nemotron 3 Ultra |
+| Cache | SQLite |
+| API communication | HTTP / OpenAI-compatible API |
+| Configuration | `.env` |
+| Python package management | pip |
+| Node package management | npm |
 
 ---
 
-## 🎯 Project Objective
-
-The objective of LinguaFlow is to create a simple translation workspace where users can quickly translate text between supported languages without dealing with a complicated interface.
-
-The application focuses on four main areas:
-
-1. **Simple user experience**
-2. **Automatic language detection**
-3. **Reliable API-based translation**
-4. **Useful translation utilities**
-
-The project was developed as part of the CodeAlpha Internship Task 1 — Language Translation Tool.
-
----
-
-## ✨ Features
-
-### 🌍 Automatic Language Detection
-
-LinguaFlow automatically attempts to identify the language of the entered text.
-
-The detection system combines:
-
-- `langdetect`
-- Unicode/script detection
-- Common English word detection
-- Short-text handling
-- Confidence checking
-- Informal English input handling
-
-Example:
-
-```text
-Hello how are you
-        ↓
-English
-```
-
-Hindi example:
-
-```text
-नमस्ते आप कैसे हैं
-        ↓
-Hindi
-```
-
-Short informal inputs are handled more carefully:
-
-```text
-Hlo
- ↓
-English
-```
-
-instead of allowing statistical detection to incorrectly classify the text as an unrelated language.
-
----
-
-## 🔄 Text Translation
-
-LinguaFlow communicates with a locally hosted LibreTranslate REST API.
-
-The translation workflow is:
-
-```text
-User Input
-    ↓
-Language Detection
-    ↓
-Source Language
-    ↓
-Target Language Selection
-    ↓
-LibreTranslate REST API
-    ↓
-Translated Text
-```
-
----
-
-## 📋 Copy Translation
-
-Users can copy the translated text directly using the **Copy** button.
-
----
-
-## 🔊 Listen to Translation
-
-LinguaFlow provides a **Listen** feature that allows users to hear the translated text using text-to-speech functionality.
-
----
-
-## 🗑️ Clear Translation
-
-The **Clear** control allows users to quickly remove the current translation workspace content and start a new translation.
-
----
-
-## 🕘 Translation History
-
-LinguaFlow provides a translation history feature so users can refer back to previous translations during the current application session.
-
----
-
-## ⚠️ Error Handling
-
-LinguaFlow handles:
-
-- Empty input
-- Missing source language
-- Missing target language
-- Failed language detection
-- Low-confidence detection
-- Translation service connection failures
-- Invalid API responses
-- Empty translation responses
-
-The application attempts to present readable error messages instead of raw backend exceptions.
-
----
-
-## 🧠 Language Detection Architecture
-
-The language detector combines script detection, English heuristics, short-input handling, statistical detection, and confidence checks.
-
-```text
-User Text
-    ↓
-Empty Input Check
-    ↓
-Script Detection
-    ↓
-English Heuristics
-    ↓
-LangDetect
-    ↓
-Confidence Check
-    ↓
-Final Language
-```
-
-This additional logic helps reduce incorrect classifications for short inputs.
-
----
-
-## 🌐 Translation API Architecture
-
-```text
-Streamlit Application
-        │
-        │ HTTP POST
-        ▼
-Translator Class
-        │
-        ▼
-LibreTranslate
-        │
-        ▼
-Translation Response
-        │
-        ▼
-Streamlit UI
-```
-
-The translation client validates input before making the API request and handles connection failures and invalid responses.
-
----
-
-## 🛠️ Technology Stack
-
-| Technology | Purpose |
-|---|---|
-| Python | Application logic |
-| Streamlit | Web interface |
-| LibreTranslate | Translation REST API |
-| Requests | HTTP API communication |
-| LangDetect | Statistical language detection |
-| HTML/CSS/JavaScript | UI enhancements where applicable |
-
----
-
-## 📂 Project Structure
+# 📁 Project Structure
 
 ```text
 LinguaFlow/
 │
 ├── app.py
-├── README.md
+├── gemini_server.mjs
+├── linguaflow_cache.db
+├── load_test.py
+├── package.json
+├── package-lock.json
 ├── requirements.txt
+├── README.md
+├── .env
 ├── .gitignore
 │
-├── src/
-│   ├── language_detector.py
-│   └── translator.py
-│
-└── tests/
+└── src/
+    ├── languages.py
+    ├── language_detector.py
+    ├── main.py
+    └── translator.py
 ```
-
-### `app.py`
-
-Contains the main Streamlit application and user interface.
-
-### `src/language_detector.py`
-
-Contains language detection logic including script detection, English heuristics, short-input handling, and confidence protection.
-
-### `src/translator.py`
-
-Contains the translation client used to communicate with the LibreTranslate REST API.
-
-### `requirements.txt`
-
-Contains the Python dependencies required by the application.
-
-### `.gitignore`
-
-Prevents unnecessary files such as virtual environments and Python cache files from being committed.
 
 ---
 
-## ⚙️ Installation
+# ⚙️ Installation
 
-### 1. Clone the Repository
+## 1. Clone the repository
 
 ```bash
-git clone https://github.com/nabinchettri18/CodeAlpha_LinguaFlow.git
-cd CodeAlpha_LinguaFlow
+git clone https://github.com/nabinchettri18/CodeAlpha_LinguaFlow
+cd LinguaFlow
 ```
 
-### 2. Create a Virtual Environment
+## 2. Create a Python virtual environment
 
-On Windows:
-
-```powershell
+```bash
 python -m venv .venv
 ```
 
-Activate it:
+## 3. Activate the environment
+
+### Windows PowerShell
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
 ```
 
-### 3. Install Dependencies
+## 4. Install Python dependencies
 
 ```powershell
 pip install -r requirements.txt
 ```
 
----
-
-## 🌐 Running LibreTranslate
-
-LinguaFlow currently uses a locally hosted LibreTranslate service during development.
-
-Start LibreTranslate:
+## 5. Install Node.js dependencies
 
 ```powershell
-libretranslate
+npm install
 ```
 
-The service should become available at:
+## 6. Configure environment variables
 
-```text
-http://127.0.0.1:5000
+Create or update the `.env` file. Use your project's actual variable names and keep real credentials private.
+
+Example:
+
+```env
+GEMINI_URL=http://127.0.0.1:8765/translate
+GEMINI_HEALTH_URL=http://127.0.0.1:8765/health
+
+GEMINI_PRIMARY_MODEL=gemini-2.5-flash
+GEMINI_FALLBACK_MODEL=gemini-3.1-flash-lite
+
+NVIDIA_CHAT_URL=https://integrate.api.nvidia.com/v1/chat/completions
+NVIDIA_API_KEY=your_nvidia_api_key
+NEMOTRON_MODEL=nvidia/nemotron-3-ultra-550b-a55b
 ```
 
-Verify the service:
+> **Security:** Never commit real API keys or credentials to GitHub. Keep `.env` private.
+
+## 7. Start LinguaFlow
 
 ```powershell
-Test-NetConnection 127.0.0.1 -Port 5000
-```
-
-A successful service should report:
-
-```text
-TcpTestSucceeded : True
-```
-
-You can also check available languages:
-
-```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:5000/languages" -Method Get
+python -m streamlit run app.py
 ```
 
 ---
 
-## 🚀 Running LinguaFlow
+# 🏗️ Architecture & Provider Strategy
 
-Keep LibreTranslate running in one terminal.
+### Normal request
 
-Open another terminal and activate the virtual environment:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
+```text
+Request
+   ↓
+SQLite Cache
+   ↓ MISS
+Gemini 2.5 Flash
+   ↓
+Success → Cache → Return
 ```
 
-Then start Streamlit:
+### Primary provider failure
 
-```powershell
-streamlit run app.py
+```text
+Gemini 2.5 Flash
+       ↓ FAILURE
+Gemini Flash-Lite
+       ↓ SUCCESS
+Cache → Return
 ```
+
+### Complete Gemini failure
+
+```text
+Gemini 2.5 Flash
+       ↓ FAIL
+Gemini Flash-Lite
+       ↓ FAIL
+NVIDIA Nemotron 3 Ultra
+       ↓ SUCCESS
+Return Translation
+```
+
+| Priority | Provider | Role |
+|---|---|---|
+| 1 | Gemini 2.5 Flash | Primary translation |
+| 2 | Gemini Flash-Lite | Secondary fallback |
+| 3 | NVIDIA Nemotron 3 Ultra | Final fallback |
+
+Nemotron is intentionally positioned as the **final reliability fallback**, rather than the normal high-speed translation path.
 
 ---
 
-## 🧪 Example
+# 🗄️ SQLite Cache
 
-### English → Hindi
-
-**Input:**
+LinguaFlow checks the SQLite cache before making an AI request.
 
 ```text
-My name is Nabin
+Translation Request
+       ↓
+Cache Lookup
+   ↙         ↘
+ HIT         MISS
+  ↓            ↓
+Result       AI Provider
+               ↓
+           Translation
+               ↓
+           Save Cache
 ```
 
-**Detected Language:**
-
-```text
-English
-```
-
-**Target Language:**
-
-```text
-Hindi
-```
-
-**Example Translation:**
-
-```text
-मेरा नाम नैबिन है
-```
+A cache hit avoids an unnecessary AI API request, providing lower latency, fewer API calls, reduced provider usage, and faster repeated translations.
 
 ---
 
-## 🔬 Example Language Detection
+# 🔍 Language Detection
 
-| Input | Detected Language |
-|---|---|
-| `Hlo` | English |
-| `Hello how are you` | English |
-| `नमस्ते आप कैसे हैं` | Hindi |
-| `হ্যালো, তুমি কেমন আছো` | Bengali |
-
-Short-input handling was added because statistical language detection can be unreliable when only a few characters are provided.
+LinguaFlow includes automatic source-language detection. Users can select **Auto-detect**, allowing the system to determine the source language before translation.
 
 ---
 
-## 🛡️ Input Validation
+# 🛡️ Reliability
 
-Examples:
-
-```text
-Empty input
-    ↓
-Validation error
-```
+Provider responses are validated before being accepted as successful translations.
 
 ```text
-Missing target language
-    ↓
-Validation error
+Provider Request
+      ↓
+Response Received
+      ↓
+Validate Output
+   ↙          ↘
+VALID        INVALID
+ ↓             ↓
+Return       Next Provider
 ```
 
-```text
-Translation service unavailable
-    ↓
-User-friendly error
-```
+If every provider fails, LinguaFlow returns a controlled translation error instead of silently returning an invalid result.
 
 ---
 
-## 📡 API Communication
+# 🧪 Nemotron 25-Request Test
 
-The translation request follows the general REST structure:
+Nemotron was independently tested with **25 unique concurrent translation requests** while Gemini providers were intentionally skipped.
 
-```text
-POST /translate
-```
+| Metric | Result |
+|---|---:|
+| Total requests | 25 |
+| Successful | 25 |
+| Failed | 0 |
+| Success rate | 100% |
+| Average latency | 160.69 s |
+| Fastest | 128.40 s |
+| Slowest | 489.55 s |
+| P50 latency | 131.02 s |
+| P95 latency | 419.86 s |
+| P99 latency | 489.47 s |
+| Throughput | 0.05 req/s |
+| Overall status | **PASS** |
 
-with:
+### Interpretation
 
-```text
-q       → Text to translate
-source  → Source language
-target  → Target language
-format  → text
-```
-
-The service returns translated text, which LinguaFlow displays in the UI.
-
----
-
-## 🖥️ Application Workflow
-
-```text
-1. User opens LinguaFlow
-          ↓
-2. User enters text
-          ↓
-3. LinguaFlow detects the source language
-          ↓
-4. User selects target language
-          ↓
-5. Translation request is sent
-          ↓
-6. LibreTranslate processes the request
-          ↓
-7. Translation is returned
-          ↓
-8. Translation is displayed
-          ↓
-9. User can Copy / Listen / Clear
-          ↓
-10. Translation can be retained in History
-```
+Nemotron successfully handled **25/25 requests** with **0 failures**. Its measured latency is substantially higher than the normal Gemini path, so Nemotron is kept as the **last-resort reliability provider**, not the primary translation engine.
 
 ---
 
-## 📸 Screenshots
+# 📌 Current Limitations
 
-Add project screenshots here for the CodeAlpha submission.
+- Nemotron is significantly slower than the normal Gemini path.
+- Nemotron is intended as the final fallback rather than the normal translation provider.
+- Translation quality can vary by language and provider.
+- External API availability can affect translation availability.
+- API quotas and rate limits can affect provider availability.
+- The current application is primarily a project/prototype rather than a public production-scale service.
+- A dedicated user authentication/account system is not currently included.
+- A full cloud-scale deployment architecture has not yet been implemented.
 
-Recommended screenshots:
+---
 
-- Main translation interface
-- Translation result
+# 🔮 Future Development
+
+The current implementation is considered stable for the project scope. The following improvements are intentionally reserved for future development.
+
+## Analytics
+
+- Advanced translation analytics
+- Provider performance dashboard
+- Detailed cache analytics
+- Request statistics
+- Latency monitoring
+
+## User Features
+
+- User accounts
+- Authentication
 - Translation history
-- Error handling
+- Saved translations
+- User preferences
+
+## Translation Capabilities
+
+- Batch translation
+- PDF translation
+- DOCX translation
+- Voice translation
+- Speech-to-text
+- Text-to-speech
+- More specialized translation models
+
+## Platform Development
+
+- Cloud deployment
+- Public API
+- Mobile application
+- Browser extension
+- Enterprise translation features
+
+## Infrastructure
+
+- Advanced monitoring
+- Automatic provider health monitoring
+- Distributed caching
+- Latency optimization
+- Horizontal scaling
+- More extensive multilingual quality evaluation
+
+These features are future development items and are not required for the current stable project implementation.
 
 ---
 
-## ⚠️ Current Limitations
+# 🔒 Security
 
-The current version uses a **locally hosted LibreTranslate instance**.
+Never publish:
 
-Therefore, the translation service must be running for LinguaFlow to perform translations.
+- API keys
+- `.env` files containing secrets
+- Private credentials
+- Service tokens
 
-The current development endpoint is:
+Use placeholders in documentation:
 
-```text
-http://127.0.0.1:5000
+```env
+NVIDIA_API_KEY=your_nvidia_api_key
 ```
 
-For public deployment, the translation service should be hosted separately or replaced with a publicly accessible translation API.
+Keep real credentials only in the local `.env` file.
 
 ---
 
-## 🚀 Future Enhancements
+# 🎯 Project Goal
 
-Potential improvements include:
+LinguaFlow demonstrates how a multilingual AI application can combine:
 
-- Cloud-hosted translation service
-- Public production deployment
-- Persistent translation history
-- User authentication
-- Database-backed history
-- Voice input
-- Improved text-to-speech controls
-- Document translation
-- File upload and translation
-- Translation export
-- Additional language support
-- Translation caching
-- API request optimization
-- Advanced language detection
-- Mobile-focused UI improvements
-
----
-
-## 🎓 CodeAlpha Internship
-
-LinguaFlow was developed as part of the:
-
-**CodeAlpha Internship**
-
-### Language Translation Tool
-
-The project demonstrates:
-
-- API-based translation
+- Artificial intelligence
+- Provider redundancy
+- Intelligent caching
 - Automatic language detection
-- Interactive user interface
-- Error handling
-- Translation utilities
-- Python application development
+- Output validation
+- Graceful failure handling
+
+into a practical translation platform.
+
+The main goal is not simply to translate text, but to demonstrate a **resilient AI architecture** capable of continuing to operate when an individual provider becomes unavailable.
 
 ---
 
-## 👨‍💻 Developer
+# 💡 Project Positioning
 
-### Nabin Chettri
-
-**B.Tech — Artificial Intelligence & Machine Learning**
+> **LinguaFlow is a resilient AI-powered multilingual translation platform that combines intelligent SQLite caching with a hierarchical AI-provider architecture. Gemini 2.5 Flash handles primary translation, Gemini Flash-Lite provides secondary resilience, and NVIDIA Nemotron 3 Ultra acts as the final fallback when the primary services become unavailable.**
 
 ---
 
-## 📜 License
+# 🚀 Status
 
-This project was created for educational and internship purposes as part of the CodeAlpha Internship.
+```text
+Production Translation Pipeline    ✅
+SQLite Cache                       ✅
+Language Detection                 ✅
+Gemini Primary                     ✅
+Gemini Flash-Lite Fallback         ✅
+Nemotron Final Fallback            ✅
+25-Request Nemotron Test           ✅
+Project Documentation              ✅
+```
+
+**Overall Project Status: STABLE**
 
 ---
 
-## ⭐ Project
+## LinguaFlow
 
-**LinguaFlow — Language Translation Tool**
-
-Built with Python, Streamlit, LangDetect, Requests, and LibreTranslate.
+**AI-powered multilingual translation with resilient provider fallback.**

@@ -1,5 +1,10 @@
 import html
 import json
+import os
+import subprocess
+import time
+
+import requests
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -12,9 +17,104 @@ from src.language_detector import (
 )
 
 
-# ============================================================
-# PAGE CONFIG
-# ============================================================
+GEMINI_HEALTH_URL = "http://127.0.0.1:8765/health"
+
+
+@st.cache_resource
+def start_gemini_service():
+    """
+    Ensure the local Gemini Node service is running.
+
+    If another Gemini service is already running, reuse it.
+    Otherwise start gemini_server.mjs automatically.
+    """
+
+    # First check whether the service is already running.
+    try:
+        response = requests.get(
+            GEMINI_HEALTH_URL,
+            timeout=1,
+        )
+
+        if response.ok:
+            return {
+                "running": True,
+                "process": None,
+            }
+
+    except requests.RequestException:
+        pass
+
+    server_file = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "gemini_server.mjs",
+    )
+
+    if not os.path.exists(server_file):
+        return {
+            "running": False,
+            "process": None,
+            "error": "gemini_server.mjs was not found.",
+        }
+
+    try:
+        creation_flags = 0
+
+        if os.name == "nt":
+            creation_flags = subprocess.CREATE_NO_WINDOW
+
+        process = subprocess.Popen(
+            ["node", server_file],
+            cwd=os.path.dirname(server_file),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=creation_flags,
+        )
+
+    except Exception as exc:
+        return {
+            "running": False,
+            "process": None,
+            "error": f"Could not start Gemini service: {exc}",
+        }
+
+    # Give Node a short moment to start, then verify it.
+    for _ in range(20):
+        try:
+            response = requests.get(
+                GEMINI_HEALTH_URL,
+                timeout=1,
+            )
+
+            if response.ok:
+                return {
+                    "running": True,
+                    "process": process,
+                }
+
+        except requests.RequestException:
+            time.sleep(0.25)
+
+    return {
+        "running": False,
+        "process": process,
+        "error": (
+            "Gemini service started but did not become "
+            "ready on port 8765."
+        ),
+    }
+
+
+gemini_service = start_gemini_service()
+
+if not gemini_service.get("running"):
+    st.warning(
+        gemini_service.get(
+            "error",
+            "Gemini service is unavailable.",
+        )
+    )
+
 
 st.set_page_config(
     page_title="LinguaFlow",
@@ -23,10 +123,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-
-# ============================================================
-# LANGUAGE NAMES
-# ============================================================
 
 LANGUAGE_NAMES = {
     "en": "English",
@@ -80,9 +176,153 @@ LANGUAGE_NAMES = {
 }
 
 
-# ============================================================
-# SESSION STATE
-# ============================================================
+def language_code_from_name(name):
+    """Return language code from display name."""
+    for code, display_name in LANGUAGE_NAMES.items():
+        if display_name == name:
+            return code
+
+    return LANGUAGES.get(name)
+
+
+def language_name_from_code(code):
+    """Return display name from language code."""
+    return LANGUAGE_NAMES.get(code, code)
+
+
+def count_words(text):
+    """Simple Unicode-friendly word count."""
+    if not text or not text.strip():
+        return 0
+
+    return len(text.strip().split())
+
+
+def add_history(
+    source_text,
+    translated_text,
+    source_code,
+    target_code,
+):
+    """Add a translation to session history."""
+
+    if not source_text.strip() or not translated_text.strip():
+        return
+
+    item = {
+        "source_text": source_text.strip(),
+        "translated_text": translated_text.strip(),
+        "source_code": source_code,
+        "target_code": target_code,
+        "source_language": language_name_from_code(
+            source_code
+        ),
+        "target_language": language_name_from_code(
+            target_code
+        ),
+        "favorite": False,
+    }
+
+    history = st.session_state.translation_history
+
+    # Avoid adding the exact same translation repeatedly.
+    if history:
+
+        latest = history[0]
+
+        if (
+            latest["source_text"] == item["source_text"]
+            and latest["translated_text"]
+            == item["translated_text"]
+            and latest["source_code"]
+            == item["source_code"]
+            and latest["target_code"]
+            == item["target_code"]
+        ):
+            return
+
+    history.insert(0, item)
+
+    # Keep the session history reasonably small.
+    if len(history) > 50:
+        del history[50:]
+
+
+def swap_callback():
+    """Safely swap the translation direction."""
+
+    detected_code = st.session_state.detected_code
+    detected_name = st.session_state.detected_language
+
+    # Nothing to swap if language detection hasn't happened.
+    if not detected_code or not detected_name:
+        return
+
+    translated = st.session_state.translated_text
+
+    if translated:
+        st.session_state.translation_input = translated
+        st.session_state.translated_text = ""
+
+    st.session_state.target_language = detected_name
+
+    st.session_state.detected_code = None
+    st.session_state.detected_language = None
+
+    st.session_state.last_source_code = None
+    st.session_state.last_target_code = None
+
+
+def clear_workspace_callback():
+    """
+    Safely clear the Streamlit text-area widget state.
+
+    This callback runs before the next script execution,
+    so Streamlit allows us to modify the widget state.
+    """
+
+    st.session_state.translation_input = ""
+    st.session_state.translated_text = ""
+
+    st.session_state.detected_code = None
+    st.session_state.detected_language = None
+
+    st.session_state.last_source_code = None
+    st.session_state.last_target_code = None
+
+
+def clear_result_callback():
+    """Clear only the translated result."""
+
+    st.session_state.translated_text = ""
+
+
+def reuse_history_callback(index):
+    """
+    Safely load a history item back into the input box.
+    """
+
+    item = st.session_state.translation_history[index]
+
+    st.session_state.translation_input = (
+        item["source_text"]
+    )
+
+    st.session_state.target_language = (
+        item["target_language"]
+    )
+
+    st.session_state.translated_text = ""
+
+    st.session_state.detected_code = None
+    st.session_state.detected_language = None
+
+
+def set_target_language(language):
+    """Set target language from the popular-language buttons."""
+
+    st.session_state.target_language = language
+
 
 if "translation_input" not in st.session_state:
     st.session_state.translation_input = ""
@@ -96,22 +336,31 @@ if "detected_code" not in st.session_state:
 if "detected_language" not in st.session_state:
     st.session_state.detected_language = None
 
+if "last_source_code" not in st.session_state:
+    st.session_state.last_source_code = None
+
+if "last_target_code" not in st.session_state:
+    st.session_state.last_target_code = None
+
+if "translation_history" not in st.session_state:
+    st.session_state.translation_history = []
+
+if "favorites" not in st.session_state:
+    st.session_state.favorites = []
+
+if "history_open" not in st.session_state:
+    st.session_state.history_open = False
+
 if "target_language" not in st.session_state:
 
     if "English" in LANGUAGES:
         st.session_state.target_language = "English"
+
     else:
         st.session_state.target_language = list(
             LANGUAGES.keys()
         )[0]
 
-if "translation_history" not in st.session_state:
-    st.session_state.translation_history = []
-
-
-# ============================================================
-# SERVICES
-# ============================================================
 
 @st.cache_resource
 def load_translator():
@@ -126,56 +375,6 @@ def load_language_detector():
 translator = load_translator()
 language_detector = load_language_detector()
 
-
-# ============================================================
-# INPUT VALIDATION
-# ============================================================
-
-def is_meaningful_text(text):
-    """
-    Reject obvious gibberish while allowing short
-    valid words such as "Hi", "Hello", "Yes", etc.
-    """
-
-    text = text.strip()
-
-    if not text:
-        return False
-
-    # Remove whitespace for analysis
-    compact_text = "".join(
-        char
-        for char in text
-        if not char.isspace()
-    )
-
-    # Count alphabetic/unicode letters
-    letters = sum(
-        1
-        for char in compact_text
-        if char.isalpha()
-    )
-
-    # A short word can still be valid.
-    # Examples: Hi, Yes, No, OK
-    if len(compact_text) <= 5:
-
-        return letters >= 2
-
-    # Longer text needs a reasonable amount
-    # of actual alphabetic content.
-    if letters < 3:
-        return False
-
-    # Reject symbol/number-heavy input.
-    if letters / len(compact_text) < 0.30:
-        return False
-
-    return True
-
-# ============================================================
-# CSS
-# ============================================================
 
 st.markdown(
     """
@@ -212,6 +411,22 @@ header[data-testid="stHeader"] {
 
 footer {
     display: none !important;
+}
+
+div[data-testid="stAlert"] {
+    background: #eff6ff !important;
+    border: 1px solid #bfdbfe !important;
+    border-radius: 10px !important;
+    color: #1e40af !important;
+}
+
+div[data-testid="stAlert"] p {
+    color: #1e40af !important;
+    font-weight: 600 !important;
+}
+
+div[data-testid="stAlert"] svg {
+    color: #2563eb !important;
 }
 
 .block-container {
@@ -527,6 +742,15 @@ div[data-testid="stTextArea"] textarea:focus {
     font-size: 12px;
 }
 
+.stats-line {
+
+    margin-top: 8px;
+
+    color: #9ca3af;
+
+    font-size: 12px;
+}
+
 
 /* ==========================================================
    BUTTONS
@@ -589,106 +813,20 @@ div[data-testid="stFormSubmitButton"] > button:hover {
 
 
 /* ==========================================================
-   WARNING / ERROR
+   FEATURE BUTTONS
    ========================================================== */
 
-div[data-testid="stAlert"] {
-
-    background: #eff6ff !important;
-
-    border: 1px solid #bfdbfe !important;
-
-    border-radius: 10px !important;
+.feature-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 10px;
 }
 
-div[data-testid="stAlert"] p {
-
-    color: #1d4ed8 !important;
-
-    font-size: 13px !important;
-
-    font-weight: 600 !important;
-}
-
-
-/* ==========================================================
-   TRANSLATION HISTORY
-   ========================================================== */
-
-.history-section {
-
-    max-width: 1080px;
-
-    margin: 45px auto 0 auto;
-}
-
-.history-title {
-
-    color: #111827;
-
-    font-size: 18px;
-
-    font-weight: 750;
-
-    margin-bottom: 14px;
-}
-
-.history-card {
-
-    max-width: 1080px;
-
-    padding: 16px;
-
-    margin: 0 auto 10px auto;
-
-    background: #ffffff;
-
-    border: 1px solid #e5e7eb;
-
-    border-radius: 12px;
-
-    box-shadow:
-        0 1px 2px rgba(0, 0, 0, 0.03);
-}
-
-.history-language {
-
-    color: #2563eb;
-
-    font-size: 12px;
-
-    font-weight: 750;
-
-    margin-bottom: 8px;
-}
-
-.history-language span {
-
+.feature-caption {
     color: #9ca3af;
-
-    margin: 0 6px;
-}
-
-.history-original {
-
-    color: #6b7280;
-
-    font-size: 13px;
-
-    margin-bottom: 6px;
-}
-
-.history-translation {
-
-    color: #111827;
-
-    font-size: 14px;
-
-    font-weight: 650;
-
-    line-height: 1.6;
-
-    overflow-wrap: break-word;
+    font-size: 11px;
+    margin-top: 6px;
 }
 
 
@@ -731,6 +869,57 @@ div[data-testid="stAlert"] p {
 
 
 /* ==========================================================
+   HISTORY
+   ========================================================== */
+
+.history-card {
+
+    padding: 16px;
+
+    margin-bottom: 10px;
+
+    background: #ffffff;
+
+    border: 1px solid #e5e7eb;
+
+    border-radius: 12px;
+}
+
+.history-meta {
+
+    color: #9ca3af;
+
+    font-size: 11px;
+
+    font-weight: 700;
+
+    margin-bottom: 8px;
+}
+
+.history-source {
+
+    color: #374151;
+
+    font-size: 13px;
+
+    line-height: 1.5;
+
+    margin-bottom: 7px;
+}
+
+.history-translation {
+
+    color: #111827;
+
+    font-size: 14px;
+
+    line-height: 1.6;
+
+    font-weight: 600;
+}
+
+
+/* ==========================================================
    FOOTER
    ========================================================== */
 
@@ -759,37 +948,29 @@ div[data-testid="stAlert"] p {
 @media (max-width: 800px) {
 
     .lingua-header {
-
         margin-bottom: 40px;
     }
 
     .lingua-status {
-
         display: none;
     }
 
     .lingua-hero-title {
-
         font-size: 40px;
-
         letter-spacing: -2px;
     }
 
     .lingua-hero-description {
-
         font-size: 14px;
     }
 
     .translation-output {
-
         min-height: 210px;
     }
 
     div[data-testid="stTextArea"] textarea {
-
         min-height: 210px !important;
     }
-
 }
 
 </style>
@@ -797,10 +978,6 @@ div[data-testid="stAlert"] p {
     unsafe_allow_html=True,
 )
 
-
-# ============================================================
-# HEADER
-# ============================================================
 
 st.html(
     """
@@ -841,10 +1018,6 @@ st.html(
 )
 
 
-# ============================================================
-# HERO
-# ============================================================
-
 st.html(
     """
     <div class="lingua-hero">
@@ -868,10 +1041,6 @@ st.html(
     """
 )
 
-
-# ============================================================
-# LANGUAGE CONTROLS
-# ============================================================
 
 source_col, swap_col, target_col = st.columns(
     [5, 1, 5],
@@ -921,11 +1090,11 @@ with swap_col:
 
     st.html("<div style='height:24px'></div>")
 
-    swap_clicked = st.button(
+    st.button (
         "⇄",
         use_container_width=True,
         help="Swap translation direction",
-        key="swap_language_button",
+        on_click=swap_callback,
     )
 
 
@@ -939,13 +1108,9 @@ with target_col:
         """
     )
 
-    language_list = list(
-        LANGUAGES.keys()
-    )
+    language_list = list(LANGUAGES.keys())
 
-    current_target = (
-        st.session_state.target_language
-    )
+    current_target = st.session_state.target_language
 
     if current_target not in language_list:
 
@@ -965,10 +1130,6 @@ with target_col:
         label_visibility="collapsed",
     )
 
-
-# ============================================================
-# INPUT / OUTPUT
-# ============================================================
 
 input_col, output_col = st.columns(
     2,
@@ -998,28 +1159,20 @@ with input_col:
 
     st.html(
         f"""
-        <div class="character-count">
-            {len(source_text):,} characters
+        <div class="stats-line">
+            {len(source_text):,} characters ·
+            {count_words(source_text):,} words
         </div>
         """
     )
 
 
-# ============================================================
-# AUTO LANGUAGE DETECTION
-# ============================================================
-
-if (
-    source_text.strip()
-    and is_meaningful_text(source_text)
-):
+if source_text.strip():
 
     try:
 
-        detected_code = (
-            language_detector.detect(
-                source_text
-            )
+        detected_code = language_detector.detect(
+            source_text
         )
 
         detected_name = LANGUAGE_NAMES.get(
@@ -1046,7 +1199,6 @@ if (
         else:
 
             st.session_state.detected_code = None
-
             st.session_state.detected_language = None
 
     except (
@@ -1055,13 +1207,11 @@ if (
     ):
 
         st.session_state.detected_code = None
-
         st.session_state.detected_language = None
 
 else:
 
     st.session_state.detected_code = None
-
     st.session_state.detected_language = None
 
 
@@ -1089,6 +1239,17 @@ with output_col:
             """
         )
 
+        st.html(
+            f"""
+            <div class="stats-line">
+                {len(st.session_state.translated_text):,}
+                characters ·
+                {count_words(st.session_state.translated_text):,}
+                words
+            </div>
+            """
+        )
+
     else:
 
         st.html(
@@ -1104,118 +1265,233 @@ with output_col:
         )
 
 
-# ============================================================
-# SWAP
-# ============================================================
+st.html(
+    """
+    <div
+        style="
+            max-width:1080px;
+            margin:10px auto 0 auto;
+        "
+    >
+        <div class="feature-caption">
+            🎤 Voice input uses your browser's speech
+            recognition. After speaking, copy the recognized
+            text into the original text box.
+        </div>
+    </div>
+    """
+)
 
-if swap_clicked:
+components.html(
+    """
+    <style>
+        * {
+            box-sizing: border-box;
+        }
 
-    detected_code = (
-        st.session_state.detected_code
-    )
+        body {
+            margin: 0;
+            padding: 0;
+            background: transparent;
+            font-family:
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                sans-serif;
+        }
 
-    detected_name = (
-        st.session_state.detected_language
-    )
+        .voice-button {
+            width: 100%;
+            min-height: 42px;
 
-    if not detected_code or not detected_name:
+            border: 1px solid #d1d5db;
+            border-radius: 9px;
 
-        st.warning(
-            "Enter some text first so LinguaFlow "
-            "can detect the language."
+            background: #ffffff;
+            color: #374151;
+
+            font-size: 13px;
+            font-weight: 700;
+
+            cursor: pointer;
+        }
+
+        .voice-button:hover {
+            background: #f8fbff;
+            border-color: #93c5fd;
+            color: #2563eb;
+        }
+
+        .voice-button.active {
+            background: #fef2f2;
+            border-color: #fecaca;
+            color: #dc2626;
+        }
+
+        .voice-status {
+            margin-top: 5px;
+            color: #9ca3af;
+            font-size: 11px;
+            text-align: center;
+        }
+    </style>
+
+    <button
+        id="voiceButton"
+        class="voice-button"
+        type="button"
+    >
+        🎤 Voice input
+    </button>
+
+    <div
+        id="voiceStatus"
+        class="voice-status"
+    >
+        Click to speak
+    </div>
+
+    <script>
+        const SpeechRecognition =
+            window.SpeechRecognition ||
+            window.webkitSpeechRecognition;
+
+        const button =
+            document.getElementById("voiceButton");
+
+        const status =
+            document.getElementById("voiceStatus");
+
+        if (!SpeechRecognition) {
+
+            button.disabled = true;
+            button.textContent =
+                "🎤 Voice input unavailable";
+
+            status.textContent =
+                "Use Chrome or Edge for voice input.";
+
+        } else {
+
+            const recognition =
+                new SpeechRecognition();
+
+            recognition.continuous = false;
+            recognition.interimResults = false;
+
+            button.onclick = function () {
+
+                try {
+
+                    recognition.start();
+
+                    button.classList.add("active");
+
+                    button.textContent =
+                        "⏹ Listening...";
+
+                    status.textContent =
+                        "Speak now";
+
+                } catch (error) {
+
+                    status.textContent =
+                        "Microphone is already active.";
+
+                }
+
+            };
+
+            recognition.onresult = function (event) {
+
+                const transcript =
+                    event.results[0][0].transcript;
+
+                navigator.clipboard.writeText(
+                    transcript
+                ).then(
+                    function () {
+
+                        status.textContent =
+                            "Recognized text copied. "
+                            + "Paste it into Original Text.";
+
+                    }
+                ).catch(
+                    function () {
+
+                        status.textContent =
+                            transcript;
+
+                    }
+                );
+            };
+
+            recognition.onerror = function () {
+
+                status.textContent =
+                    "Voice recognition failed.";
+
+            };
+
+            recognition.onend = function () {
+
+                button.classList.remove("active");
+
+                button.textContent =
+                    "🎤 Voice input";
+
+            };
+        }
+    </script>
+    """,
+    height=72,
+    scrolling=False,
+)
+
+
+translate_col, clear_col = st.columns(
+    [5, 1]
+)
+
+
+with translate_col:
+
+    with st.form(
+        "translation_form",
+        clear_on_submit=False,
+    ):
+
+        submitted = st.form_submit_button(
+            "Translate",
+            use_container_width=True,
         )
 
-    elif detected_name not in language_list:
 
-        st.warning(
-            "The detected language is not available "
-            "as a target language."
-        )
+with clear_col:
 
-    else:
-
-        # Store swap values first.
-        swapped_text = (
-            st.session_state.translated_text
-        )
-
-        if swapped_text:
-
-            st.session_state.translation_input = (
-                swapped_text
-            )
-
-            st.session_state.translated_text = ""
-
-        st.session_state.target_language = (
-            detected_name
-        )
-
-        st.rerun()
-
-
-# ============================================================
-# ACTION ROW
-# ============================================================
-
-with st.form(
-    "translation_form",
-    clear_on_submit=False,
-):
-
-    submitted = st.form_submit_button(
-        "Translate",
+    clear_clicked = st.button(
+        "Clear",
         use_container_width=True,
+        on_click=clear_workspace_callback,
+        key="clear_workspace",
     )
 
-
-# ============================================================
-# TRANSLATION
-# ============================================================
 
 if submitted:
 
-    # --------------------------------------------------------
-    # EMPTY INPUT
-    # --------------------------------------------------------
-
     if not source_text.strip():
-
-        st.session_state.translated_text = ""
 
         st.warning(
             "Please enter some text to translate."
         )
 
-    # --------------------------------------------------------
-    # GIBBERISH / INVALID INPUT
-    # --------------------------------------------------------
-
-    elif not is_meaningful_text(source_text):
-
-        st.session_state.translated_text = ""
-
-        st.warning(
-            "We couldn't understand this input. "
-            "Please enter a meaningful word or sentence."
-        )
-
-    # --------------------------------------------------------
-    # LANGUAGE NOT DETECTED
-    # --------------------------------------------------------
-
     elif not st.session_state.detected_code:
-
-        st.session_state.translated_text = ""
 
         st.warning(
             "Unable to detect the language. "
             "Try entering a longer sentence."
         )
-
-    # --------------------------------------------------------
-    # TRANSLATION
-    # --------------------------------------------------------
 
     else:
 
@@ -1234,41 +1510,30 @@ if submitted:
                 "is not available."
             )
 
-        # ----------------------------------------------------
-        # SAME LANGUAGE
-        # ----------------------------------------------------
-
         elif source_code == target_code:
 
-            translated = (
-                source_text.strip()
-            )
+            translated = source_text.strip()
 
             st.session_state.translated_text = (
                 translated
             )
 
-            # Save to history
-            st.session_state.translation_history.insert(
-                0,
-                {
-                    "source_text": source_text.strip(),
-                    "source_language": source_code,
-                    "target_language": target_code,
-                    "translated_text": translated,
-                },
+            st.session_state.last_source_code = (
+                source_code
             )
 
-            # Keep latest 10
-            st.session_state.translation_history = (
-                st.session_state.translation_history[:10]
+            st.session_state.last_target_code = (
+                target_code
+            )
+
+            add_history(
+                source_text,
+                translated,
+                source_code,
+                target_code,
             )
 
             st.rerun()
-
-        # ----------------------------------------------------
-        # LOCAL TRANSLATION SERVICE
-        # ----------------------------------------------------
 
         else:
 
@@ -1288,45 +1553,38 @@ if submitted:
                         translated
                     )
 
-                    # ========================================
-                    # SAVE SUCCESSFUL TRANSLATION
-                    # ========================================
-
-                    st.session_state.translation_history.insert(
-                        0,
-                        {
-                            "source_text": source_text.strip(),
-                            "source_language": source_code,
-                            "target_language": target_code,
-                            "translated_text": translated,
-                        },
+                    st.session_state.last_source_code = (
+                        source_code
                     )
 
-                    # Keep only latest 10
-                    st.session_state.translation_history = (
-                        st.session_state.translation_history[:10]
+                    st.session_state.last_target_code = (
+                        target_code
+                    )
+
+                    add_history(
+                        source_text,
+                        translated,
+                        source_code,
+                        target_code,
                     )
 
                     st.rerun()
 
                 except TranslationError as exc:
 
-                    st.session_state.translated_text = ""
+                    print(f"[LinguaFlow] Translation error: {exc}")
 
-                    st.error(str(exc))
+                    st.error(
+                        "Translation unavailable. "
+                        "Please try again or choose another language."
+                    )
 
                 except Exception as exc:
-
-                    st.session_state.translated_text = ""
 
                     st.error(
                         f"Translation failed: {exc}"
                     )
 
-
-# ============================================================
-# RESULT ACTIONS
-# ============================================================
 
 if st.session_state.translated_text:
 
@@ -1349,39 +1607,42 @@ if st.session_state.translated_text:
         st.session_state.translated_text
     )
 
-    js_text = json.dumps(
-        translation_to_copy,
-        ensure_ascii=False,
+    source_to_copy = str(
+        st.session_state.translation_input
     )
 
-    target_code = LANGUAGES.get(
-        st.session_state.target_language,
-        "en",
+    target_code_for_speech = (
+        st.session_state.last_target_code
+        or language_code_from_name(target_language)
+        or "en"
     )
 
-    js_target_code = json.dumps(
-        target_code,
-        ensure_ascii=False,
-    )
-
-    # ========================================================
-    # THREE BUTTONS IN ONE ROW
-    # ========================================================
+    # --------------------------------------------------------
+    # ACTION ROW 1
+    # --------------------------------------------------------
 
     action_col1, action_col2, action_col3 = st.columns(
-        3,
-        gap="small",
+        3
     )
 
-    # ========================================================
-    # COPY
-    # ========================================================
+
+    # --------------------------------------------------------
+    # --------------------------------------------------------
 
     with action_col1:
+
+        js_text = json.dumps(
+            translation_to_copy,
+            ensure_ascii=False,
+        )
 
         components.html(
             f"""
             <style>
+
+                * {{
+                    box-sizing: border-box;
+                }}
 
                 body {{
                     margin: 0;
@@ -1391,7 +1652,7 @@ if st.session_state.translated_text:
 
                 .action-button {{
                     width: 100%;
-                    height: 42px;
+                    min-height: 42px;
 
                     display: flex;
                     align-items: center;
@@ -1405,12 +1666,6 @@ if st.session_state.translated_text:
                     border-radius: 9px;
 
                     color: #374151;
-
-                    font-family:
-                        -apple-system,
-                        BlinkMacSystemFont,
-                        "Segoe UI",
-                        sans-serif;
 
                     font-size: 13px;
                     font-weight: 700;
@@ -1424,115 +1679,50 @@ if st.session_state.translated_text:
                     color: #2563eb;
                 }}
 
-                .success {{
-                    background: #f0fdf4 !important;
-                    border-color: #bbf7d0 !important;
-                    color: #15803d !important;
-                }}
-
             </style>
 
             <button
-                id="copyButton"
+                id="copyTranslation"
                 class="action-button"
                 type="button"
             >
-                📋 Copy
+                📋 Copy translation
             </button>
 
             <script>
 
-                const copyText = {js_text};
+                const text =
+                    {js_text};
 
-                const copyButton =
+                const button =
                     document.getElementById(
-                        "copyButton"
+                        "copyTranslation"
                     );
 
-                copyButton.onclick = async function () {{
-
-                    let copied = false;
+                button.onclick =
+                    async function () {{
 
                     try {{
 
-                        if (navigator.clipboard) {{
-
-                            await navigator.clipboard.writeText(
-                                copyText
-                            );
-
-                            copied = true;
-                        }}
-
-                    }} catch (error) {{
-
-                        copied = false;
-
-                    }}
-
-                    if (!copied) {{
-
-                        try {{
-
-                            const textarea =
-                                document.createElement(
-                                    "textarea"
-                                );
-
-                            textarea.value =
-                                copyText;
-
-                            textarea.style.position =
-                                "fixed";
-
-                            textarea.style.left =
-                                "-9999px";
-
-                            document.body.appendChild(
-                                textarea
-                            );
-
-                            textarea.focus();
-
-                            textarea.select();
-
-                            copied =
-                                document.execCommand(
-                                    "copy"
-                                );
-
-                            textarea.remove();
-
-                        }} catch (error) {{
-
-                            copied = false;
-
-                        }}
-
-                    }}
-
-                    if (copied) {{
-
-                        copyButton.classList.add(
-                            "success"
+                        await navigator.clipboard.writeText(
+                            text
                         );
 
-                        copyButton.textContent =
+                        button.textContent =
                             "✓ Copied!";
 
                         setTimeout(
                             function () {{
-
-                                copyButton.classList.remove(
-                                    "success"
-                                );
-
-                                copyButton.textContent =
-                                    "📋 Copy";
-
+                                button.textContent =
+                                    "📋 Copy translation";
                             }},
                             1600
                         );
+
+                    }} catch (error) {{
+
+                        button.textContent =
+                            "Copy failed";
 
                     }}
 
@@ -1544,15 +1734,232 @@ if st.session_state.translated_text:
             scrolling=False,
         )
 
-    # ========================================================
-    # LISTEN
-    # ========================================================
+
+    # --------------------------------------------------------
+    # --------------------------------------------------------
 
     with action_col2:
+
+        speech_text = json.dumps(
+            translation_to_copy,
+            ensure_ascii=False,
+        )
+
+        speech_lang = json.dumps(
+            target_code_for_speech,
+        )
 
         components.html(
             f"""
             <style>
+                * {{ box-sizing: border-box; }}
+                body {{
+                    margin: 0;
+                    padding: 0;
+                    background: transparent;
+                }}
+                .listen-wrap {{
+                    display: flex;
+                    gap: 6px;
+                }}
+                #listen {{
+                    flex: 1;
+                    min-height: 42px;
+                }}
+                #speed {{
+                    width: 95px;
+                    min-height: 42px;
+                    padding: 0 8px;
+                    border: 1px solid #d1d5db;
+                    border-radius: 9px;
+                    background: #ffffff;
+                    color: #374151;
+                    font-size: 13px;
+                    font-weight: 700;
+                }}
+                button {{
+                    min-height: 42px;
+                    border: 1px solid #d1d5db;
+                    border-radius: 9px;
+                    background: #ffffff;
+                    color: #374151;
+                    font-size: 13px;
+                    font-weight: 700;
+                    cursor: pointer;
+                }}
+                button:hover,
+                #speed:hover {{
+                    background: #f8fbff;
+                    border-color: #93c5fd;
+                    color: #2563eb;
+                }}
+            </style>
+
+            <div class="listen-wrap">
+                <button id="listen" type="button">🔊 Listen</button>
+
+                <select id="speed">
+                    <option value="0.75">0.75x</option>
+                    <option value="1" selected>1x</option>
+                    <option value="1.25">1.25x</option>
+                    <option value="1.5">1.5x</option>
+                </select>
+            </div>
+
+            <script>
+                const speechText = {speech_text};
+                const requestedLanguage = {speech_lang};
+
+                const listenButton = document.getElementById("listen");
+                const speedSelect = document.getElementById("speed");
+
+                const languageMap = {{
+                    "en": "en-US",
+                    "hi": "hi-IN", "bn": "bn-IN", "mr": "mr-IN",
+                    "gu": "gu-IN", "ur": "ur-IN", "pa": "pa-IN",
+                    "as": "as-IN", "or": "or-IN", "ne": "ne-NP",
+                    "ta": "ta-IN", "te": "te-IN", "kn": "kn-IN",
+                    "ml": "ml-IN",
+                    "ar": "ar-SA", "es": "es-ES", "fr": "fr-FR",
+                    "de": "de-DE", "it": "it-IT", "pt": "pt-PT",
+                    "pt-br": "pt-BR", "ru": "ru-RU", "ja": "ja-JP",
+                    "ko": "ko-KR", "zh-hans": "zh-CN", "zh-hant": "zh-TW",
+                    "tr": "tr-TR", "nl": "nl-NL", "sv": "sv-SE",
+                    "da": "da-DK", "fi": "fi-FI", "nb": "nb-NO",
+                    "pl": "pl-PL", "cs": "cs-CZ", "ro": "ro-RO",
+                    "el": "el-GR", "he": "he-IL", "th": "th-TH",
+                    "vi": "vi-VN", "id": "id-ID", "ms": "ms-MY",
+                    "tl": "fil-PH", "sw": "sw-KE", "ga": "ga-IE",
+                    "hu": "hu-HU", "uk": "uk-UA", "fa": "fa-IR",
+                    "bg": "bg-BG", "ca": "ca-ES", "eu": "eu-ES",
+                    "et": "et-EE", "lv": "lv-LV", "lt": "lt-LT",
+                    "sk": "sk-SK", "sl": "sl-SI", "sq": "sq-AL",
+                    "az": "az-AZ", "ky": "ky-KG"
+                }};
+
+                function getSpeechLocale(code) {{
+                    const normalized = String(code || "en").toLowerCase();
+                    return languageMap[normalized] || normalized;
+                }}
+
+                function findVoice(locale) {{
+                    const voices = window.speechSynthesis.getVoices();
+                    if (!voices.length) return null;
+
+                    const wanted = locale.toLowerCase();
+                    const family = wanted.split("-")[0];
+
+                    return (
+                        voices.find(v =>
+                            v.lang &&
+                            v.lang.toLowerCase() === wanted
+                        ) ||
+                        voices.find(v =>
+                            v.lang &&
+                            v.lang.toLowerCase().split("-")[0] === family
+                        ) ||
+                        null
+                    );
+                }}
+
+                function stopSpeech() {{
+                    window.speechSynthesis.cancel();
+                    listenButton.textContent = "🔊 Listen";
+                }}
+
+                listenButton.onclick = function () {{
+                    if (!("speechSynthesis" in window)) {{
+                        listenButton.textContent = "Not supported";
+                        return;
+                    }}
+
+                    if (!speechText.trim()) return;
+
+                    if (window.speechSynthesis.speaking) {{
+                        stopSpeech();
+                        return;
+                    }}
+
+                    window.speechSynthesis.cancel();
+
+                    const locale = getSpeechLocale(requestedLanguage);
+                    const utterance = new SpeechSynthesisUtterance(speechText);
+                    const voice = findVoice(locale);
+
+                    utterance.lang = locale;
+                    utterance.rate = Number(speedSelect.value);
+                    utterance.pitch = 1;
+
+                    if (voice) {{
+                        utterance.voice = voice;
+                        utterance.lang = voice.lang;
+                    }}
+
+                    utterance.onstart = function () {{
+                        listenButton.textContent = "⏹ Stop";
+                    }};
+
+                    utterance.onend = function () {{
+                        listenButton.textContent = "🔊 Listen";
+                    }};
+
+                    utterance.onerror = function () {{
+                        listenButton.textContent = "🔊 Listen";
+                    }};
+
+                    window.speechSynthesis.speak(utterance);
+                }};
+
+                window.speechSynthesis.onvoiceschanged = function () {{
+                    window.speechSynthesis.getVoices();
+                }};
+            </script>
+            """,
+            height=48,
+            scrolling=False,
+        )
+
+
+    # --------------------------------------------------------
+    # --------------------------------------------------------
+
+    with action_col3:
+
+        st.download_button(
+            "⬇ Download",
+            data=translation_to_copy,
+            file_name="linguaflow_translation.txt",
+            mime="text/plain",
+            use_container_width=True,
+        )
+
+
+    # --------------------------------------------------------
+    # ACTION ROW 2
+    # --------------------------------------------------------
+
+    action_col4, action_col5, action_col6 = st.columns(
+        3
+    )
+
+
+    # --------------------------------------------------------
+    # --------------------------------------------------------
+
+    with action_col4:
+
+        original_js = json.dumps(
+            source_to_copy,
+            ensure_ascii=False,
+        )
+
+        components.html(
+            f"""
+            <style>
+
+                * {{
+                    box-sizing: border-box;
+                }}
 
                 body {{
                     margin: 0;
@@ -1560,28 +1967,15 @@ if st.session_state.translated_text:
                     background: transparent;
                 }}
 
-                .listen-button {{
+                button {{
                     width: 100%;
-                    height: 42px;
-
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    gap: 7px;
-
-                    background: #ffffff;
+                    min-height: 42px;
 
                     border: 1px solid #d1d5db;
-
                     border-radius: 9px;
 
+                    background: #ffffff;
                     color: #374151;
-
-                    font-family:
-                        -apple-system,
-                        BlinkMacSystemFont,
-                        "Segoe UI",
-                        sans-serif;
 
                     font-size: 13px;
                     font-weight: 700;
@@ -1589,122 +1983,54 @@ if st.session_state.translated_text:
                     cursor: pointer;
                 }}
 
-                .listen-button:hover {{
+                button:hover {{
                     background: #f8fbff;
                     border-color: #93c5fd;
                     color: #2563eb;
                 }}
 
-                .speaking {{
-                    background: #eff6ff !important;
-                    border-color: #bfdbfe !important;
-                    color: #2563eb !important;
-                }}
-
             </style>
 
-            <button
-                id="listenButton"
-                class="listen-button"
-                type="button"
-            >
-                🔊 Listen
+            <button id="copyOriginal">
+                📋 Copy original
             </button>
 
             <script>
 
-                const speechText = {js_text};
+                const original =
+                    {original_js};
 
-                const speechLanguage =
-                    {js_target_code};
-
-                const listenButton =
+                const button =
                     document.getElementById(
-                        "listenButton"
+                        "copyOriginal"
                     );
 
-                let speaking = false;
+                button.onclick =
+                    async function () {{
 
-                function stopSpeaking() {{
+                    try {{
 
-                    window.speechSynthesis.cancel();
-
-                    speaking = false;
-
-                    listenButton.classList.remove(
-                        "speaking"
-                    );
-
-                    listenButton.textContent =
-                        "🔊 Listen";
-                }}
-
-                listenButton.onclick = function () {{
-
-                    if (
-                        !("speechSynthesis" in window)
-                    ) {{
-
-                        listenButton.textContent =
-                            "Not supported";
-
-                        return;
-
-                    }}
-
-                    if (speaking) {{
-
-                        stopSpeaking();
-
-                        return;
-
-                    }}
-
-                    window.speechSynthesis.cancel();
-
-                    const utterance =
-                        new SpeechSynthesisUtterance(
-                            speechText
+                        await navigator.clipboard.writeText(
+                            original
                         );
 
-                    utterance.lang =
-                        speechLanguage;
+                        button.textContent =
+                            "✓ Copied!";
 
-                    utterance.rate = 0.95;
+                        setTimeout(
+                            function () {{
+                                button.textContent =
+                                    "📋 Copy original";
+                            }},
+                            1600
+                        );
 
-                    utterance.pitch = 1;
+                    }} catch (error) {{
 
-                    utterance.onstart =
-                        function () {{
+                        button.textContent =
+                            "Copy failed";
 
-                            speaking = true;
-
-                            listenButton.classList.add(
-                                "speaking"
-                            );
-
-                            listenButton.textContent =
-                                "⏹ Stop";
-
-                        }};
-
-                    utterance.onend =
-                        function () {{
-
-                            stopSpeaking();
-
-                        }};
-
-                    utterance.onerror =
-                        function () {{
-
-                            stopSpeaking();
-
-                        }};
-
-                    window.speechSynthesis.speak(
-                        utterance
-                    );
+                    }}
 
                 }};
 
@@ -1714,103 +2040,90 @@ if st.session_state.translated_text:
             scrolling=False,
         )
 
-    # ========================================================
-    # CLEAR
-    # ========================================================
 
-    with action_col3:
+    # --------------------------------------------------------
+    # --------------------------------------------------------
+
+    with action_col5:
+
+        current_source = (
+            st.session_state.translation_input
+        )
+
+        current_translation = (
+            st.session_state.translated_text
+        )
+
+        already_favorite = any(
+            item["source_text"] == current_source
+            and item["translated_text"]
+            == current_translation
+            for item in st.session_state.favorites
+        )
 
         if st.button(
-            "🗑️ Clear",
+            "★ Favorited"
+            if already_favorite
+            else "☆ Favorite",
             use_container_width=True,
-            key="clear_result_button",
+            key="favorite_current",
         ):
 
-            st.session_state.translated_text = ""
+            favorite_item = {
+                "source_text": current_source,
+                "translated_text": current_translation,
+                "source_code": (
+                    st.session_state.last_source_code
+                ),
+                "target_code": (
+                    st.session_state.last_target_code
+                ),
+                "source_language": language_name_from_code(
+                    st.session_state.last_source_code
+                    or ""
+                ),
+                "target_language": language_name_from_code(
+                    st.session_state.last_target_code
+                    or ""
+                ),
+            }
+
+            if already_favorite:
+
+                st.session_state.favorites = [
+                    item
+                    for item
+                    in st.session_state.favorites
+                    if not (
+                        item["source_text"]
+                        == current_source
+                        and item["translated_text"]
+                        == current_translation
+                    )
+                ]
+
+            else:
+
+                st.session_state.favorites.insert(
+                    0,
+                    favorite_item,
+                )
 
             st.rerun()
 
 
-# ============================================================
-# TRANSLATION HISTORY
-# ============================================================
+    # --------------------------------------------------------
+    # --------------------------------------------------------
 
-if st.session_state.translation_history:
+    with action_col6:
 
-    st.html(
-        """
-        <div class="history-section">
-
-            <div class="history-title">
-                Translation history
-            </div>
-
-        </div>
-        """
-    )
-
-    for item in (
-        st.session_state.translation_history
-    ):
-
-        source_name = LANGUAGE_NAMES.get(
-            item["source_language"],
-            item["source_language"],
+        st.button(
+            "Clear translation",
+            use_container_width=True,
+            key="clear_result",
+            on_click=clear_result_callback,
         )
 
-        target_name = LANGUAGE_NAMES.get(
-            item["target_language"],
-            item["target_language"],
-        )
-
-        safe_source = html.escape(
-            item["source_text"]
-        )
-
-        safe_translation = html.escape(
-            item["translated_text"]
-        )
-
-        st.html(
-            f"""
-            <div class="history-card">
-
-                <div class="history-language">
-                    {source_name}
-                    <span>→</span>
-                    {target_name}
-                </div>
-
-                <div class="history-original">
-                    {safe_source}
-                </div>
-
-                <div class="history-translation">
-                    {safe_translation}
-                </div>
-
-            </div>
-            """
-        )
-
-    # ========================================================
-    # CLEAR HISTORY
-    # ========================================================
-
-    if st.button(
-        "Clear History",
-        use_container_width=True,
-        key="clear_history_button",
-    ):
-
-        st.session_state.translation_history = []
-
-        st.rerun()
-
-
-# ============================================================
-# POPULAR LANGUAGES
-# ============================================================
 
 st.html(
     """
@@ -1858,12 +2171,418 @@ for column, language in zip(
                 language,
                 use_container_width=True,
                 key=f"popular_{language}",
+                on_click=set_target_language,
+                args=(language,),
             )
 
 
-# ============================================================
-# INFORMATION
-# ============================================================
+st.html(
+    """
+    <div
+        style="
+            max-width:1080px;
+            margin:45px auto 0 auto;
+        "
+    >
+
+        <div class="language-label">
+            TRANSLATION HISTORY
+        </div>
+
+    </div>
+    """
+)
+
+
+history_count = len(
+    st.session_state.translation_history
+)
+
+favorite_count = len(
+    st.session_state.favorites
+)
+
+
+history_top1, history_top2, history_top3 = st.columns(
+    [4, 2, 2]
+)
+
+
+with history_top1:
+
+    st.caption(
+        f"{history_count} translation"
+        + ("s" if history_count != 1 else "")
+        + f" · {favorite_count} favorite"
+        + ("s" if favorite_count != 1 else "")
+    )
+
+
+with history_top2:
+
+    if history_count:
+
+        if st.button(
+            "Show / Hide",
+            use_container_width=True,
+            key="toggle_history",
+        ):
+
+            st.session_state.history_open = (
+                not st.session_state.history_open
+            )
+
+            st.rerun()
+
+
+with history_top3:
+
+    if history_count:
+
+        if st.button(
+            "Clear history",
+            use_container_width=True,
+            key="clear_history",
+        ):
+
+            st.session_state.translation_history = []
+
+            st.rerun()
+
+
+if st.session_state.history_open:
+
+    if not st.session_state.translation_history:
+
+        st.info(
+            "No translation history yet."
+        )
+
+    else:
+
+        for index, item in enumerate(
+            st.session_state.translation_history
+        ):
+
+            source_name = html.escape(
+                item["source_language"]
+            )
+
+            target_name = html.escape(
+                item["target_language"]
+            )
+
+            safe_source = html.escape(
+                item["source_text"]
+            )
+
+            safe_translation = html.escape(
+                item["translated_text"]
+            )
+
+            st.html(
+                f"""
+                <div class="history-card">
+
+                    <div class="history-meta">
+                        {source_name}
+                        →
+                        {target_name}
+                    </div>
+
+                    <div class="history-source">
+                        {safe_source}
+                    </div>
+
+                    <div class="history-translation">
+                        {safe_translation}
+                    </div>
+
+                </div>
+                """
+            )
+
+            h1, h2, h3, h4 = st.columns(
+                [2, 2, 2, 2]
+            )
+
+
+            # ------------------------------------------------
+            # ------------------------------------------------
+
+            with h1:
+
+                st.button(
+                   "↩ Reuse",
+                   key=f"reuse_{index}",
+                   use_container_width=True,
+                   on_click=reuse_history_callback,
+                   args=(index,),
+                )
+            # ------------------------------------------------
+            # ------------------------------------------------
+
+            with h2:
+
+                history_copy = json.dumps(
+                    item["translated_text"],
+                    ensure_ascii=False,
+                )
+
+                components.html(
+                    f"""
+                    <button
+                        id="historyCopy{index}"
+                        style="
+                            width:100%;
+                            min-height:42px;
+                            border:1px solid #d1d5db;
+                            border-radius:9px;
+                            background:#ffffff;
+                            color:#374151;
+                            font-size:13px;
+                            font-weight:700;
+                            cursor:pointer;
+                        "
+                    >
+                        📋 Copy
+                    </button>
+
+                    <script>
+
+                    const historyText =
+                        {history_copy};
+
+                    const historyButton =
+                        document.getElementById(
+                            "historyCopy{index}"
+                        );
+
+                    historyButton.onclick =
+                        async function () {{
+
+                        try {{
+
+                            await navigator.clipboard.writeText(
+                                historyText
+                            );
+
+                            historyButton.textContent =
+                                "✓ Copied!";
+
+                            setTimeout(
+                                function () {{
+                                    historyButton.textContent =
+                                        "📋 Copy";
+                                }},
+                                1200
+                            );
+
+                        }} catch (error) {{
+
+                            historyButton.textContent =
+                                "Copy failed";
+
+                        }}
+
+                    }};
+
+                    </script>
+                    """,
+                    height=48,
+                    scrolling=False,
+                )
+
+
+            # ------------------------------------------------
+            # ------------------------------------------------
+
+            with h3:
+
+                history_text = json.dumps(
+                    item["translated_text"],
+                    ensure_ascii=False,
+                )
+
+                history_lang = json.dumps(
+                    item["target_code"] or "en"
+                )
+
+                components.html(
+                    f"""
+                    <button
+                        id="historyListen{index}"
+                        style="
+                            width:100%;
+                            min-height:42px;
+                            border:1px solid #d1d5db;
+                            border-radius:9px;
+                            background:#ffffff;
+                            color:#374151;
+                            font-size:13px;
+                            font-weight:700;
+                            cursor:pointer;
+                        "
+                    >🔊 Listen</button>
+
+                    <script>
+                        const historySpeech{index} = {history_text};
+                        const historyLang{index} = {history_lang};
+                        const historyButton{index} =
+                            document.getElementById("historyListen{index}");
+
+                        const historyLanguageMap{index} = {{
+                            "en":"en-US","hi":"hi-IN","bn":"bn-IN","mr":"mr-IN",
+                            "gu":"gu-IN","ur":"ur-IN","pa":"pa-IN","as":"as-IN",
+                            "or":"or-IN","ne":"ne-NP","ta":"ta-IN","te":"te-IN",
+                            "kn":"kn-IN","ml":"ml-IN","ar":"ar-SA","es":"es-ES",
+                            "fr":"fr-FR","de":"de-DE","it":"it-IT","pt":"pt-PT",
+                            "pt-br":"pt-BR","ru":"ru-RU","ja":"ja-JP","ko":"ko-KR",
+                            "zh-hans":"zh-CN","zh-hant":"zh-TW","tr":"tr-TR",
+                            "nl":"nl-NL","sv":"sv-SE","da":"da-DK","fi":"fi-FI",
+                            "nb":"nb-NO","pl":"pl-PL","cs":"cs-CZ","ro":"ro-RO",
+                            "el":"el-GR","he":"he-IL","th":"th-TH","vi":"vi-VN",
+                            "id":"id-ID","ms":"ms-MY","tl":"fil-PH","sw":"sw-KE",
+                            "ga":"ga-IE","hu":"hu-HU","uk":"uk-UA","fa":"fa-IR",
+                            "bg":"bg-BG","ca":"ca-ES","eu":"eu-ES","et":"et-EE",
+                            "lv":"lv-LV","lt":"lt-LT","sk":"sk-SK","sl":"sl-SI",
+                            "sq":"sq-AL","az":"az-AZ","ky":"ky-KG"
+                        }};
+
+                        historyButton{index}.onclick = function () {{
+                            window.speechSynthesis.cancel();
+
+                            const code = String(historyLang{index} || "en").toLowerCase();
+                            const locale =
+                                historyLanguageMap{index}[code] || code;
+
+                            const utterance =
+                                new SpeechSynthesisUtterance(historySpeech{index});
+
+                            utterance.lang = locale;
+                            utterance.rate = 1;
+
+                            const voices =
+                                window.speechSynthesis.getVoices();
+
+                            const family = locale.split("-")[0];
+
+                            const voice =
+                                voices.find(v =>
+                                    v.lang &&
+                                    v.lang.toLowerCase() === locale.toLowerCase()
+                                ) ||
+                                voices.find(v =>
+                                    v.lang &&
+                                    v.lang.toLowerCase().split("-")[0] === family
+                                );
+
+                            if (voice) {{
+                                utterance.voice = voice;
+                                utterance.lang = voice.lang;
+                            }}
+
+                            window.speechSynthesis.speak(utterance);
+                        }};
+                    </script>
+                    """,
+                    height=48,
+                    scrolling=False,
+                )
+
+
+            # ------------------------------------------------
+            # ------------------------------------------------
+
+            with h4:
+
+                is_favorite = any(
+                    fav["source_text"]
+                    == item["source_text"]
+                    and fav["translated_text"]
+                    == item["translated_text"]
+                    for fav
+                    in st.session_state.favorites
+                )
+
+                if st.button(
+                    "★ Saved"
+                    if is_favorite
+                    else "☆ Save",
+                    key=f"save_history_{index}",
+                    use_container_width=True,
+                ):
+
+                    if is_favorite:
+
+                        st.session_state.favorites = [
+                            fav
+                            for fav
+                            in st.session_state.favorites
+                            if not (
+                                fav["source_text"]
+                                == item["source_text"]
+                                and fav["translated_text"]
+                                == item[
+                                    "translated_text"
+                                ]
+                            )
+                        ]
+
+                    else:
+
+                        st.session_state.favorites.append(
+                            item.copy()
+                        )
+
+                    st.rerun()
+
+
+if st.session_state.favorites:
+
+    st.html(
+        """
+        <div
+            style="
+                max-width:1080px;
+                margin:30px auto 0 auto;
+            "
+        >
+
+            <div class="language-label">
+                FAVORITES
+            </div>
+
+        </div>
+        """
+    )
+
+    for index, item in enumerate(
+        st.session_state.favorites
+    ):
+
+        st.html(
+            f"""
+            <div class="history-card">
+
+                <div class="history-meta">
+                    {html.escape(item["source_language"])}
+                    →
+                    {html.escape(item["target_language"])}
+                </div>
+
+                <div class="history-source">
+                    {html.escape(item["source_text"])}
+                </div>
+
+                <div class="history-translation">
+                    {html.escape(item["translated_text"])}
+                </div>
+
+            </div>
+            """
+        )
+
 
 st.html(
     """
@@ -1874,20 +2593,14 @@ st.html(
         </div>
 
         <div class="info-text">
-            LinguaFlow automatically detects the language
-            of your text and translates it into your selected
-            destination language using a local translation
-            service.
+          Created by Nabin chettri.
+          Do follow me on LINKEDIN.
         </div>
 
     </div>
     """
 )
 
-
-# ============================================================
-# FOOTER
-# ============================================================
 
 st.html(
     """
