@@ -34,7 +34,7 @@ except Exception:
     GEMINI_USE_LOCAL_SERVER = (
         os.getenv("GEMINI_USE_LOCAL_SERVER", "true").lower() == "true"
     )
-
+     
 
 # ============================================================
 # GEMINI SERVICE
@@ -139,13 +139,12 @@ gemini_service = (
 )
 
 if not gemini_service.get("running"):
-    if gemini_service.get("error"):
-        st.warning(
-            gemini_service.get(
-                "error",
-                "Gemini service is unavailable.",
-            )
+    st.warning(
+        gemini_service.get(
+            "error",
+            "Gemini service is unavailable.",
         )
+    )
 
 
 # ============================================================
