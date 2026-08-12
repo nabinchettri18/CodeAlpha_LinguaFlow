@@ -17,6 +17,24 @@ from src.language_detector import (
 )
 
 
+# ============================================================
+# GEMINI CONFIGURATION
+# ============================================================
+
+if "GEMINI_USE_LOCAL_SERVER" in st.secrets:
+    GEMINI_USE_LOCAL_SERVER = (
+        str(st.secrets["GEMINI_USE_LOCAL_SERVER"]).lower() == "true"
+    )
+else:
+    GEMINI_USE_LOCAL_SERVER = (
+        os.getenv("GEMINI_USE_LOCAL_SERVER", "true").lower() == "true"
+    )
+
+
+# ============================================================
+# GEMINI SERVICE
+# ============================================================
+
 GEMINI_HEALTH_URL = "http://127.0.0.1:8765/health"
 
 
@@ -105,16 +123,29 @@ def start_gemini_service():
     }
 
 
-gemini_service = start_gemini_service()
+gemini_service = (
+    start_gemini_service()
+    if GEMINI_USE_LOCAL_SERVER
+    else {
+        "running": True,
+        "process": None,
+        "error": None,
+    }
+)
 
 if not gemini_service.get("running"):
-    st.warning(
-        gemini_service.get(
-            "error",
-            "Gemini service is unavailable.",
+    if gemini_service.get("error"):
+        st.warning(
+            gemini_service.get(
+                "error",
+                "Gemini service is unavailable.",
+            )
         )
-    )
 
+
+# ============================================================
+# PAGE CONFIG
+# ============================================================
 
 st.set_page_config(
     page_title="LinguaFlow",
@@ -123,6 +154,10 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+
+# ============================================================
+# LANGUAGE NAMES
+# ============================================================
 
 LANGUAGE_NAMES = {
     "en": "English",
@@ -175,6 +210,10 @@ LANGUAGE_NAMES = {
     "ky": "Kyrgyz",
 }
 
+
+# ============================================================
+# HELPER FUNCTIONS
+# ============================================================
 
 def language_code_from_name(name):
     """Return language code from display name."""
@@ -246,6 +285,17 @@ def add_history(
     # Keep the session history reasonably small.
     if len(history) > 50:
         del history[50:]
+
+
+def clear_translation_state():
+    """Clear current translation workspace safely."""
+
+    st.session_state.translation_input = ""
+    st.session_state.translated_text = ""
+    st.session_state.detected_code = None
+    st.session_state.detected_language = None
+    st.session_state.last_source_code = None
+    st.session_state.last_target_code = None
 
 
 def swap_callback():
@@ -324,6 +374,10 @@ def set_target_language(language):
     st.session_state.target_language = language
 
 
+# ============================================================
+# SESSION STATE
+# ============================================================
+
 if "translation_input" not in st.session_state:
     st.session_state.translation_input = ""
 
@@ -362,6 +416,10 @@ if "target_language" not in st.session_state:
         )[0]
 
 
+# ============================================================
+# SERVICES
+# ============================================================
+
 @st.cache_resource
 def load_translator():
     return Translator()
@@ -375,6 +433,10 @@ def load_language_detector():
 translator = load_translator()
 language_detector = load_language_detector()
 
+
+# ============================================================
+# CSS
+# ============================================================
 
 st.markdown(
     """
@@ -979,6 +1041,10 @@ div[data-testid="stFormSubmitButton"] > button:hover {
 )
 
 
+# ============================================================
+# HEADER
+# ============================================================
+
 st.html(
     """
     <div class="lingua-header">
@@ -1018,6 +1084,10 @@ st.html(
 )
 
 
+# ============================================================
+# HERO
+# ============================================================
+
 st.html(
     """
     <div class="lingua-hero">
@@ -1041,6 +1111,10 @@ st.html(
     """
 )
 
+
+# ============================================================
+# LANGUAGE CONTROLS
+# ============================================================
 
 source_col, swap_col, target_col = st.columns(
     [5, 1, 5],
@@ -1131,6 +1205,10 @@ with target_col:
     )
 
 
+# ============================================================
+# INPUT / OUTPUT
+# ============================================================
+
 input_col, output_col = st.columns(
     2,
     gap="large",
@@ -1166,6 +1244,10 @@ with input_col:
         """
     )
 
+
+# ============================================================
+# AUTO LANGUAGE DETECTION
+# ============================================================
 
 if source_text.strip():
 
@@ -1264,6 +1346,10 @@ with output_col:
             """
         )
 
+
+# ============================================================
+# VOICE INPUT
+# ============================================================
 
 st.html(
     """
@@ -1450,6 +1536,10 @@ components.html(
 )
 
 
+# ============================================================
+# ACTION ROW
+# ============================================================
+
 translate_col, clear_col = st.columns(
     [5, 1]
 )
@@ -1477,6 +1567,10 @@ with clear_col:
         key="clear_workspace",
     )
 
+
+# ============================================================
+# TRANSLATION
+# ============================================================
 
 if submitted:
 
@@ -1586,6 +1680,10 @@ if submitted:
                     )
 
 
+# ============================================================
+# RESULT ACTIONS
+# ============================================================
+
 if st.session_state.translated_text:
 
     st.html(
@@ -1627,6 +1725,7 @@ if st.session_state.translated_text:
 
 
     # --------------------------------------------------------
+    # COPY TRANSLATION
     # --------------------------------------------------------
 
     with action_col1:
@@ -1736,6 +1835,7 @@ if st.session_state.translated_text:
 
 
     # --------------------------------------------------------
+    # LISTEN
     # --------------------------------------------------------
 
     with action_col2:
@@ -1921,6 +2021,7 @@ if st.session_state.translated_text:
 
 
     # --------------------------------------------------------
+    # DOWNLOAD
     # --------------------------------------------------------
 
     with action_col3:
@@ -1944,6 +2045,7 @@ if st.session_state.translated_text:
 
 
     # --------------------------------------------------------
+    # COPY ORIGINAL
     # --------------------------------------------------------
 
     with action_col4:
@@ -2042,6 +2144,7 @@ if st.session_state.translated_text:
 
 
     # --------------------------------------------------------
+    # FAVORITE
     # --------------------------------------------------------
 
     with action_col5:
@@ -2113,17 +2216,22 @@ if st.session_state.translated_text:
 
 
     # --------------------------------------------------------
+    # CLEAR RESULT
     # --------------------------------------------------------
 
     with action_col6:
 
         st.button(
-            "Clear translation",
-            use_container_width=True,
-            key="clear_result",
-            on_click=clear_result_callback,
-        )
+    "Clear translation",
+    use_container_width=True,
+    key="clear_result",
+    on_click=clear_result_callback,
+)
 
+
+# ============================================================
+# POPULAR LANGUAGES
+# ============================================================
 
 st.html(
     """
@@ -2175,6 +2283,10 @@ for column, language in zip(
                 args=(language,),
             )
 
+
+# ============================================================
+# HISTORY
+# ============================================================
 
 st.html(
     """
@@ -2308,6 +2420,7 @@ if st.session_state.history_open:
 
 
             # ------------------------------------------------
+            # REUSE
             # ------------------------------------------------
 
             with h1:
@@ -2320,6 +2433,7 @@ if st.session_state.history_open:
                    args=(index,),
                 )
             # ------------------------------------------------
+            # COPY
             # ------------------------------------------------
 
             with h2:
@@ -2395,6 +2509,7 @@ if st.session_state.history_open:
 
 
             # ------------------------------------------------
+            # LISTEN
             # ------------------------------------------------
 
             with h3:
@@ -2492,6 +2607,7 @@ if st.session_state.history_open:
 
 
             # ------------------------------------------------
+            # FAVORITE
             # ------------------------------------------------
 
             with h4:
@@ -2537,6 +2653,10 @@ if st.session_state.history_open:
 
                     st.rerun()
 
+
+# ============================================================
+# FAVORITES
+# ============================================================
 
 if st.session_state.favorites:
 
@@ -2584,6 +2704,10 @@ if st.session_state.favorites:
         )
 
 
+# ============================================================
+# INFORMATION
+# ============================================================
+
 st.html(
     """
     <div class="info-section">
@@ -2601,6 +2725,10 @@ st.html(
     """
 )
 
+
+# ============================================================
+# FOOTER
+# ============================================================
 
 st.html(
     """
