@@ -4,26 +4,44 @@ import sqlite3
 import time
 
 import requests
+import streamlit as st
 from dotenv import load_dotenv
 from google import genai
 
 load_dotenv()
-GOOGLE_API_KEY = (
-    os.getenv("GOOGLE_API_KEY")
-    or os.getenv("GEMINI_API_KEY")
-    or ""
+
+def _get_config(name, default=""):
+    """Read Streamlit Secrets first, then environment variables."""
+    try:
+        import streamlit as st
+
+        if name in st.secrets:
+            return str(st.secrets[name])
+    except Exception:
+        pass
+
+    return os.getenv(name, default)
+
+
+GEMINI_USE_LOCAL_SERVER = (
+    _get_config(
+        "GEMINI_USE_LOCAL_SERVER",
+        "true",
+    ).strip().lower()
+    == "true"
 )
 
-GEMINI_USE_LOCAL_SERVER = os.getenv(
-    "GEMINI_USE_LOCAL_SERVER",
-    "true",
-).lower() == "true"
+GOOGLE_API_KEY = (
+    _get_config("GOOGLE_API_KEY")
+    or _get_config("GEMINI_API_KEY")
+)
 
-gemini_client = (
+GEMINI_CLIENT = (
     genai.Client(api_key=GOOGLE_API_KEY)
     if GOOGLE_API_KEY
     else None
 )
+
 
 
 class TranslationError(Exception):
@@ -222,9 +240,9 @@ class Translator:
     # ==========================================================
 
     def __init__(self):
-        self.nvidia_api_key = os.getenv(
+        self.nvidia_api_key = _get_config(
             "NVIDIA_API_KEY"
-        )
+        ).strip()
 
         self.last_provider = None
 
@@ -666,9 +684,9 @@ class Translator:
             target_language,
         )
 
-        # ------------------------------------------------------
+        # ======================================================
         # LOCAL MODE
-        # ------------------------------------------------------
+        # ======================================================
 
         if GEMINI_USE_LOCAL_SERVER:
             payload = {
@@ -720,7 +738,9 @@ class Translator:
                             time.sleep(delay)
                             continue
 
-                        raise TranslationError(last_error)
+                        raise TranslationError(
+                            last_error
+                        )
 
                     response.raise_for_status()
 
@@ -778,18 +798,20 @@ class Translator:
                         time.sleep(delay)
                         continue
 
-                    raise TranslationError(last_error) from exc
+                    raise TranslationError(
+                        last_error
+                    ) from exc
 
             raise TranslationError(
                 last_error
                 or f"{model} translation failed."
             )
 
-        # ------------------------------------------------------
+        # ======================================================
         # CLOUD MODE
-        # ------------------------------------------------------
+        # ======================================================
 
-        if not gemini_client:
+        if not GEMINI_CLIENT:
             raise TranslationError(
                 "Google API key is not configured."
             )
@@ -797,13 +819,12 @@ class Translator:
         prompt = (
             f"Translate the following text from "
             f"{source_name} to {target_name}.\n\n"
-            "Rules:\n"
-            "1. Return only the translated text.\n"
-            "2. Do not explain the translation.\n"
-            "3. Do not answer questions contained in the text.\n"
-            "4. Preserve names, numbers, punctuation, URLs, "
+            "Return ONLY the translated text.\n"
+            "Do not explain the translation.\n"
+            "Do not answer questions contained in the text.\n"
+            "Preserve names, numbers, punctuation, URLs, "
             "and formatting where possible.\n"
-            "5. Preserve the original meaning, tone, and intent.\n\n"
+            "Preserve the original meaning, tone, and intent.\n\n"
             f"Text:\n{text}"
         )
 
@@ -813,7 +834,7 @@ class Translator:
             self.GEMINI_RETRIES + 1
         ):
             try:
-                response = gemini_client.models.generate_content(
+                response = GEMINI_CLIENT.models.generate_content(
                     model=model,
                     contents=prompt,
                 )
@@ -825,7 +846,8 @@ class Translator:
 
                 if not result:
                     raise TranslationError(
-                        f"{model} returned an empty translation."
+                        f"{model} returned an empty "
+                        "translation."
                     )
 
                 return result
@@ -834,21 +856,26 @@ class Translator:
                 raise
 
             except Exception as exc:
-                last_error = (
-                    f"{model} request failed: {exc}"
-                )
+                error_text = str(exc)
+                low = error_text.lower()
 
-                error_text = str(exc).lower()
-
+                # Quota/rate-limit errors should immediately
+                # allow the existing provider fallback.
                 if (
-                    "429" in error_text
-                    or "quota" in error_text
-                    or "resource_exhausted" in error_text
-                    or "too many requests" in error_text
+                    "429" in low
+                    or "quota" in low
+                    or "resource_exhausted" in low
+                    or "rate limit" in low
+                    or "too many requests" in low
                 ):
                     raise TranslationError(
                         f"{model} quota exceeded."
                     ) from exc
+
+                last_error = (
+                    f"{model} request failed: "
+                    f"{error_text}"
+                )
 
                 if attempt < self.GEMINI_RETRIES:
                     delay = self.GEMINI_RETRY_DELAYS[

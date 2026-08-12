@@ -21,11 +21,16 @@ from src.language_detector import (
 # GEMINI CONFIGURATION
 # ============================================================
 
-if "GEMINI_USE_LOCAL_SERVER" in st.secrets:
-    GEMINI_USE_LOCAL_SERVER = (
-        str(st.secrets["GEMINI_USE_LOCAL_SERVER"]).lower() == "true"
-    )
-else:
+try:
+    if "GEMINI_USE_LOCAL_SERVER" in st.secrets:
+        GEMINI_USE_LOCAL_SERVER = (
+            str(st.secrets["GEMINI_USE_LOCAL_SERVER"]).lower() == "true"
+        )
+    else:
+        GEMINI_USE_LOCAL_SERVER = (
+            os.getenv("GEMINI_USE_LOCAL_SERVER", "true").lower() == "true"
+        )
+except Exception:
     GEMINI_USE_LOCAL_SERVER = (
         os.getenv("GEMINI_USE_LOCAL_SERVER", "true").lower() == "true"
     )
