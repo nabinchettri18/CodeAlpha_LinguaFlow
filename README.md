@@ -388,13 +388,12 @@ LinguaFlow is the completed project maintained for the **CodeAlpha internship/pr
 
 ---
 
-## 💼 Portfolio Positioning
+## 💼 Portfolio 
 
-### Short description
+### Description
 
 > **LinguaFlow is an AI-powered multilingual translation platform built with Python and Streamlit. It uses SQLite caching and a resilient multi-provider architecture with Gemini 2.5 Flash as the primary translator, Gemini Flash-Lite as a secondary fallback, and NVIDIA Nemotron 3 Ultra as the final reliability provider. The application supports automatic language detection and separate local and Streamlit Cloud execution paths.**
 
-### Resume-ready bullets
 
 - Built and deployed **LinguaFlow**, a multilingual AI translation platform using **Python, Streamlit, Google Gemini, NVIDIA Nemotron, SQLite, and language detection**.
 - Designed a **multi-provider fallback architecture** that automatically switches from Gemini 2.5 Flash to Gemini Flash-Lite and Nemotron when providers fail or become unavailable.
