@@ -2,90 +2,149 @@
 
 **AI-Powered Multilingual Translation Platform**
 
-LinguaFlow is a resilient multilingual translation platform built around an intelligent provider-fallback architecture. It combines **SQLite caching** with multiple AI translation providers so temporary provider failures do not immediately result in a failed translation request.
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Streamlit-FF4B4B?logo=streamlit&logoColor=white)](https://linguaflowtranslate.streamlit.app/)
+[![GitHub](https://img.shields.io/badge/GitHub-Repository-181717?logo=github&logoColor=white)](https://github.com/nabinchettri18/CodeAlpha_LinguaFlow)
+
+LinguaFlow is a resilient multilingual AI translation platform built with **Python, Streamlit, Google Gemini, NVIDIA Nemotron, SQLite, and automatic language detection**.
+
+The core engineering idea is a **multi-provider fallback architecture**: Gemini 2.5 Flash handles primary translation, Gemini Flash-Lite provides a secondary fallback, and NVIDIA Nemotron 3 Ultra acts as the final reliability provider.
+
+## 🚀 Live Demo
+
+**Try LinguaFlow:** https://linguaflowtranslate.streamlit.app/
+
+**Source Code:** https://github.com/nabinchettri18/CodeAlpha_LinguaFlow
+
+> The hosted Streamlit deployment uses the Google GenAI Python SDK directly. Local development can use the Node.js Gemini service.
 
 ---
 
-## ✨ Overview
-
-LinguaFlow uses a hierarchical translation pipeline:
-
-```text
-                    LINGUAFLOW
-                        │
-                        ▼
-                  SQLite Cache
-                   │         │
-                  HIT       MISS
-                   │         │
-                   ▼         ▼
-                Result   Gemini 2.5 Flash
-                              │
-                         failure / quota
-                              ▼
-                       Gemini Flash-Lite
-                              │
-                         failure / quota
-                              ▼
-                    NVIDIA Nemotron 3 Ultra
-                              │
-                           failure
-                              ▼
-                    TranslationError
-```
-
-The cache is checked first. On a cache miss, LinguaFlow attempts the AI providers in order. If a provider fails or becomes unavailable, the system automatically moves to the next provider.
-
----
-
-# 🚀 Key Features
+## ✨ Key Features
 
 - 🌍 Multilingual AI translation
+- 🔍 Automatic language detection
 - ⚡ SQLite translation caching
 - 🤖 Gemini 2.5 Flash primary provider
 - 🔄 Gemini Flash-Lite secondary fallback
 - 🛡️ NVIDIA Nemotron 3 Ultra final fallback
-- 🔍 Automatic language detection
+- ♻️ Retry, cooldown, and graceful provider failure handling
 - ✅ Translation output validation
-- 🧩 Streamlit user interface
-- 🔐 Environment-based API configuration
-- 🧪 Independent provider testing
-- ♻️ Graceful provider failure handling
+- 🧩 Streamlit web interface
+- ☁️ Streamlit Cloud deployment
+- 💻 Local Node.js Gemini service for development
+- 🔐 Environment / Streamlit Secrets based configuration
 
 ---
 
-# 🧰 Tech Stack
+## 🧠 Translation Pipeline
+
+```text
+                         LINGUAFLOW
+                             │
+                             ▼
+                       SQLite Cache
+                       │          │
+                     HIT         MISS
+                       │          │
+                       ▼          ▼
+                    Result   Gemini 2.5 Flash
+                                  │
+                           failure / quota
+                                  ▼
+                         Gemini Flash-Lite
+                                  │
+                           failure / quota
+                                  ▼
+                      NVIDIA Nemotron 3 Ultra
+                                  │
+                               failure
+                                  ▼
+                         TranslationError
+```
+
+A cache hit avoids an unnecessary AI request. On a cache miss, providers are attempted in order until a valid translation is returned or all available providers fail.
+
+---
+
+## 🏗️ Deployment Architecture
+
+LinguaFlow supports two execution modes while keeping the same provider strategy.
+
+### Local Development
+
+```text
+Streamlit
+    ↓
+Translator
+    ↓
+gemini_server.mjs
+    ↓
+Node.js :8765
+    ↓
+Google Gemini
+```
+
+Local mode:
+
+```env
+GEMINI_USE_LOCAL_SERVER=true
+```
+
+### Streamlit Cloud
+
+The hosted application does **not** require Node.js or `gemini_server.mjs`.
+
+```text
+Streamlit Cloud
+      ↓
+Python Translator
+      ↓
+Google GenAI SDK
+      ↓
+Google Gemini
+```
+
+Cloud mode:
+
+```toml
+GEMINI_USE_LOCAL_SERVER = false
+```
+
+This hybrid design keeps local development convenient while allowing the deployed application to run without a separate Node.js backend.
+
+---
+
+## 🧰 Tech Stack
 
 | Layer | Technology |
 |---|---|
 | Frontend | Streamlit |
-| Backend | Python |
-| AI service layer | Node.js |
+| Application | Python |
+| Local AI service | Node.js |
+| Google AI SDK | `google-genai` |
 | Primary model | Gemini 2.5 Flash |
 | Secondary model | Gemini Flash-Lite |
 | Final fallback | NVIDIA Nemotron 3 Ultra |
 | Cache | SQLite |
-| API communication | HTTP / OpenAI-compatible API |
-| Configuration | `.env` |
-| Python package management | pip |
-| Node package management | npm |
+| Language detection | `langdetect` |
+| HTTP communication | Requests |
+| Configuration | `.env` / Streamlit Secrets |
+| Deployment | Streamlit Cloud |
 
 ---
 
-# 📁 Project Structure
+## 📁 Project Structure
 
 ```text
-LinguaFlow/
+CodeAlpha_LinguaFlow/
 │
 ├── app.py
 ├── gemini_server.mjs
-├── linguaflow_cache.db
 ├── load_test.py
 ├── package.json
 ├── package-lock.json
 ├── requirements.txt
 ├── README.md
-├── .env
 ├── .gitignore
 │
 └── src/
@@ -95,64 +154,67 @@ LinguaFlow/
     └── translator.py
 ```
 
+> `.env`, API credentials, and private runtime data should not be committed.
+
 ---
 
-# ⚙️ Installation
+## ⚙️ Local Installation
 
-## 1. Clone the repository
+### 1. Clone
 
 ```bash
-git clone https://github.com/nabinchettri18/CodeAlpha_LinguaFlow
-cd LinguaFlow
+git clone https://github.com/nabinchettri18/CodeAlpha_LinguaFlow.git
+cd CodeAlpha_LinguaFlow
 ```
 
-## 2. Create a Python virtual environment
+### 2. Create a virtual environment
 
 ```bash
 python -m venv .venv
 ```
 
-## 3. Activate the environment
-
-### Windows PowerShell
+Windows PowerShell:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
 ```
 
-## 4. Install Python dependencies
+### 3. Install Python dependencies
 
 ```powershell
 pip install -r requirements.txt
 ```
 
-## 5. Install Node.js dependencies
+### 4. Install Node dependencies
 
 ```powershell
 npm install
 ```
 
-## 6. Configure environment variables
+Node.js is required only for local Gemini-service mode.
 
-Create or update the `.env` file. Use your project's actual variable names and keep real credentials private.
+### 5. Configure `.env`
 
 Example:
 
 ```env
+GEMINI_USE_LOCAL_SERVER=true
+
+GOOGLE_API_KEY=your_google_api_key
+GEMINI_API_KEY=your_google_api_key
+
 GEMINI_URL=http://127.0.0.1:8765/translate
 GEMINI_HEALTH_URL=http://127.0.0.1:8765/health
 
 GEMINI_PRIMARY_MODEL=gemini-2.5-flash
 GEMINI_FALLBACK_MODEL=gemini-3.1-flash-lite
 
-NVIDIA_CHAT_URL=https://integrate.api.nvidia.com/v1/chat/completions
 NVIDIA_API_KEY=your_nvidia_api_key
+NVIDIA_CHAT_URL=https://integrate.api.nvidia.com/v1/chat/completions
 NEMOTRON_MODEL=nvidia/nemotron-3-ultra-550b-a55b
 ```
 
-> **Security:** Never commit real API keys or credentials to GitHub. Keep `.env` private.
-
-## 7. Start LinguaFlow
+### 6. Run
 
 ```powershell
 python -m streamlit run app.py
@@ -160,7 +222,39 @@ python -m streamlit run app.py
 
 ---
 
-# 🏗️ Architecture & Provider Strategy
+## ☁️ Streamlit Cloud
+
+Configure these values under **Manage app → Settings → Secrets**:
+
+```toml
+GOOGLE_API_KEY = "your_google_api_key"
+GEMINI_USE_LOCAL_SERVER = false
+NVIDIA_API_KEY = "your_nvidia_api_key"
+```
+
+The Cloud deployment then uses:
+
+```text
+Streamlit Cloud
+      ↓
+Python Translator
+      ↓
+Google GenAI SDK
+      ↓
+Gemini
+```
+
+No local port `8765` or Node.js process is required.
+
+---
+
+## 🔄 Provider Strategy
+
+| Priority | Provider | Role |
+|---|---|---|
+| 1 | Gemini 2.5 Flash | Primary translation |
+| 2 | Gemini Flash-Lite | Secondary fallback |
+| 3 | NVIDIA Nemotron 3 Ultra | Final reliability fallback |
 
 ### Normal request
 
@@ -174,7 +268,7 @@ Gemini 2.5 Flash
 Success → Cache → Return
 ```
 
-### Primary provider failure
+### Primary failure
 
 ```text
 Gemini 2.5 Flash
@@ -196,17 +290,9 @@ NVIDIA Nemotron 3 Ultra
 Return Translation
 ```
 
-| Priority | Provider | Role |
-|---|---|---|
-| 1 | Gemini 2.5 Flash | Primary translation |
-| 2 | Gemini Flash-Lite | Secondary fallback |
-| 3 | NVIDIA Nemotron 3 Ultra | Final fallback |
-
-Nemotron is intentionally positioned as the **final reliability fallback**, rather than the normal high-speed translation path.
-
 ---
 
-# 🗄️ SQLite Cache
+## 🗄️ SQLite Cache
 
 LinguaFlow checks the SQLite cache before making an AI request.
 
@@ -224,17 +310,17 @@ Result       AI Provider
            Save Cache
 ```
 
-A cache hit avoids an unnecessary AI API request, providing lower latency, fewer API calls, reduced provider usage, and faster repeated translations.
+Caching reduces repeated API calls and improves response time for repeated translations.
 
 ---
 
-# 🔍 Language Detection
+## 🔍 Automatic Language Detection
 
-LinguaFlow includes automatic source-language detection. Users can select **Auto-detect**, allowing the system to determine the source language before translation.
+Users can select **Auto-detect** as the source language. LinguaFlow uses its language detection module to determine the source language before translation.
 
 ---
 
-# 🛡️ Reliability
+## 🛡️ Reliability
 
 Provider responses are validated before being accepted as successful translations.
 
@@ -250,11 +336,11 @@ VALID        INVALID
 Return       Next Provider
 ```
 
-If every provider fails, LinguaFlow returns a controlled translation error instead of silently returning an invalid result.
+The application also uses retry/cooldown behavior for transient failures and moves to the next provider when a provider becomes unavailable or rate-limited.
 
 ---
 
-# 🧪 Nemotron 25-Request Test
+## 🧪 Nemotron Load Test
 
 Nemotron was independently tested with **25 unique concurrent translation requests** while Gemini providers were intentionally skipped.
 
@@ -273,77 +359,85 @@ Nemotron was independently tested with **25 unique concurrent translation reques
 | Throughput | 0.05 req/s |
 | Overall status | **PASS** |
 
-### Interpretation
-
-Nemotron successfully handled **25/25 requests** with **0 failures**. Its measured latency is substantially higher than the normal Gemini path, so Nemotron is kept as the **last-resort reliability provider**, not the primary translation engine.
+Nemotron's measured latency is substantially higher than the normal Gemini path, supporting its role as the final fallback rather than the primary provider.
 
 ---
 
-# 📌 Current Limitations
+## 🎓 CodeAlpha Internship Project
+
+LinguaFlow is the completed project maintained for the **CodeAlpha internship/project workflow**.
+
+### Project highlights
+
+- Built a multilingual AI translation application
+- Designed a resilient multi-provider architecture
+- Integrated Google Gemini models
+- Integrated NVIDIA Nemotron as a final fallback
+- Implemented SQLite caching
+- Added automatic language detection
+- Implemented retry, cooldown, and output validation
+- Created a local Node.js Gemini service
+- Added a separate Streamlit Cloud execution path using the Google GenAI Python SDK
+- Deployed the application on Streamlit Cloud
+- Maintained the project with Git and GitHub
+
+### Submission links
+
+- **GitHub:** https://github.com/nabinchettri18/CodeAlpha_LinguaFlow
+- **Live Demo:** https://linguaflowtranslate.streamlit.app/
+
+---
+
+## 💼 Portfolio Positioning
+
+### Short description
+
+> **LinguaFlow is an AI-powered multilingual translation platform built with Python and Streamlit. It uses SQLite caching and a resilient multi-provider architecture with Gemini 2.5 Flash as the primary translator, Gemini Flash-Lite as a secondary fallback, and NVIDIA Nemotron 3 Ultra as the final reliability provider. The application supports automatic language detection and separate local and Streamlit Cloud execution paths.**
+
+### Resume-ready bullets
+
+- Built and deployed **LinguaFlow**, a multilingual AI translation platform using **Python, Streamlit, Google Gemini, NVIDIA Nemotron, SQLite, and language detection**.
+- Designed a **multi-provider fallback architecture** that automatically switches from Gemini 2.5 Flash to Gemini Flash-Lite and Nemotron when providers fail or become unavailable.
+- Implemented **SQLite caching, retry handling, output validation, and provider cooldown logic** to improve reliability and reduce repeated API requests.
+- Deployed the application to **Streamlit Cloud** using the Google GenAI Python SDK while retaining a Node.js Gemini service for local development.
+
+### Portfolio links
+
+- **Live Demo:** https://linguaflowtranslate.streamlit.app/
+- **GitHub:** https://github.com/nabinchettri18/CodeAlpha_LinguaFlow
+
+---
+
+## 📌 Current Limitations
 
 - Nemotron is significantly slower than the normal Gemini path.
-- Nemotron is intended as the final fallback rather than the normal translation provider.
 - Translation quality can vary by language and provider.
-- External API availability can affect translation availability.
-- API quotas and rate limits can affect provider availability.
-- The current application is primarily a project/prototype rather than a public production-scale service.
-- A dedicated user authentication/account system is not currently included.
-- A full cloud-scale deployment architecture has not yet been implemented.
+- External API availability, quotas, and rate limits can affect provider availability.
+- The project is currently an internship/portfolio-scale application rather than a large public production service.
+- User authentication and account management are not currently included.
+- Advanced analytics and distributed infrastructure are not currently implemented.
 
 ---
 
-# 🔮 Future Development
+## 🔮 Future Development
 
-The current implementation is considered stable for the project scope. The following improvements are intentionally reserved for future development.
-
-## Analytics
-
-- Advanced translation analytics
 - Provider performance dashboard
 - Detailed cache analytics
-- Request statistics
-- Latency monitoring
-
-## User Features
-
-- User accounts
-- Authentication
 - Translation history
-- Saved translations
-- User preferences
-
-## Translation Capabilities
-
+- User accounts and authentication
 - Batch translation
-- PDF translation
-- DOCX translation
+- PDF/DOCX translation
 - Voice translation
-- Speech-to-text
-- Text-to-speech
-- More specialized translation models
-
-## Platform Development
-
-- Cloud deployment
 - Public API
 - Mobile application
 - Browser extension
-- Enterprise translation features
-
-## Infrastructure
-
-- Advanced monitoring
-- Automatic provider health monitoring
 - Distributed caching
-- Latency optimization
 - Horizontal scaling
-- More extensive multilingual quality evaluation
-
-These features are future development items and are not required for the current stable project implementation.
+- Automated multilingual quality evaluation
 
 ---
 
-# 🔒 Security
+## 🔒 Security
 
 Never publish:
 
@@ -355,50 +449,32 @@ Never publish:
 Use placeholders in documentation:
 
 ```env
+GOOGLE_API_KEY=your_google_api_key
 NVIDIA_API_KEY=your_nvidia_api_key
 ```
 
-Keep real credentials only in the local `.env` file.
+For Streamlit Cloud, store credentials in **Secrets**, not in the repository.
 
 ---
 
-# 🎯 Project Goal
-
-LinguaFlow demonstrates how a multilingual AI application can combine:
-
-- Artificial intelligence
-- Provider redundancy
-- Intelligent caching
-- Automatic language detection
-- Output validation
-- Graceful failure handling
-
-into a practical translation platform.
-
-The main goal is not simply to translate text, but to demonstrate a **resilient AI architecture** capable of continuing to operate when an individual provider becomes unavailable.
-
----
-
-# 💡 Project Positioning
-
-> **LinguaFlow is a resilient AI-powered multilingual translation platform that combines intelligent SQLite caching with a hierarchical AI-provider architecture. Gemini 2.5 Flash handles primary translation, Gemini Flash-Lite provides secondary resilience, and NVIDIA Nemotron 3 Ultra acts as the final fallback when the primary services become unavailable.**
-
----
-
-# 🚀 Status
+## 📊 Project Status
 
 ```text
-Production Translation Pipeline    ✅
-SQLite Cache                       ✅
-Language Detection                 ✅
-Gemini Primary                     ✅
-Gemini Flash-Lite Fallback         ✅
-Nemotron Final Fallback            ✅
-25-Request Nemotron Test           ✅
-Project Documentation              ✅
-```
+Multilingual Translation            ✅
+SQLite Cache                        ✅
+Automatic Language Detection       ✅
+Gemini Primary                      ✅
+Gemini Flash-Lite Fallback          ✅
+Nemotron Final Fallback             ✅
+Provider Failure Handling           ✅
+Local Development Mode              ✅
+Streamlit Cloud Deployment          ✅
+GitHub Repository                   ✅
+Live Demo                           ✅
+CodeAlpha Project                   ✅
 
-**Overall Project Status: STABLE**
+Overall Status: STABLE / DEPLOYED
+```
 
 ---
 
@@ -406,4 +482,4 @@ Project Documentation              ✅
 
 **AI-powered multilingual translation with resilient provider fallback.**
 
-**Created by : Nabin Chettri.**
+**Created by Nabin Chettri.**
